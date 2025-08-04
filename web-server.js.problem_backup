@@ -1,0 +1,461 @@
+/**
+ * Web Server для просмотра скриншотов
+ * Модернизированная версия с TypeScript типизацией через JSDoc, async/await и валидацией
+ */
+
+// Загружаем переменные окружения и зависимости для DevOps
+require("dotenv").config();
+const logger = require("./lib/logger");
+const metrics = require("./lib/metrics");
+const TemplateRenderer = require("./lib/templateRenderer");
+const { z } = require('zod');
+
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs').promises;
+const fsSync = require('fs');
+const { getExternalIp, getConfig, updateConfig, clearCache, getCacheInfo } = require('./lib/getExternalIp');
+
+const templateRenderer = new TemplateRenderer();
+const app = express();
+const PORT = process.env.PORT || 9000;
+const RESULTS_DIR = path.join(__dirname, 'results');
+
+// Схемы валидации
+const configSchema = z.object({
+  cacheTimeout: z.number().min(1000).max(3600000).optional(),
+  maxRetries: z.number().min(1).max(10).optional(),
+  timeout: z.number().min(1000).max(30000).optional()
+});
+
+const screenshotQuerySchema = z.object({
+  site: z.string().min(1).max(255),
+  timestamp: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/)
+});
+
+/**
+ * @typedef {Object} ServerConfig
+ * @property {number} port - Порт сервера
+ * @property {string} resultsDir - Директория с результатами
+ * @property {number} cacheTimeout - Таймаут кеша в миллисекундах
+ */
+
+/**
+ * @typedef {Object} ScreenshotInfo
+ * @property {string} site - Имя сайта
+ * @property {string} timestamp - Временная метка
+ * @property {number} size - Размер файла в байтах
+ * @property {Date} created - Дата создания
+ * @property {string} path - Путь к файлу
+ */
+
+/**
+ * Валидация конфигурации сервера
+ * @param {Object} config - Конфигурация для валидации
+ * @returns {Object} Валидированная конфигурация
+ * @throws {Error} Ошибка валидации
+ */
+function validateConfig(config) {
+  try {
+    return configSchema.parse(config);
+  } catch (error) {
+    throw new Error(`Invalid server config: ${error.message}`);
+  }
+}
+
+/**
+ * Асинхронное получение списка всех скриншотов
+ * @returns {Promise<ScreenshotInfo[]>} Массив информации о скриншотах
+ */
+async function getAllScreenshots() {
+  try {
+    const screenshots = [];
+    
+    if (!fsSync.existsSync(RESULTS_DIR)) {
+      await fs.mkdir(RESULTS_DIR, { recursive: true });
+      return screenshots;
+    }
+    
+    const sites = await fs.readdir(RESULTS_DIR);
+    
+    for (const site of sites) {
+      const sitePath = path.join(RESULTS_DIR, site);
+      const siteStats = await fs.stat(sitePath);
+      
+      if (siteStats.isDirectory()) {
+        const timestamps = await fs.readdir(sitePath);
+        
+        for (const timestamp of timestamps) {
+          const timestampPath = path.join(sitePath, timestamp);
+          const timestampStats = await fs.stat(timestampPath);
+          
+          if (timestampStats.isDirectory()) {
+            const screenshotPath = path.join(timestampPath, 'screenshot.png');
+            
+            if (fsSync.existsSync(screenshotPath)) {
+              const stats = await fs.stat(screenshotPath);
+              screenshots.push({
+                site,
+                timestamp,
+                size: stats.size,
+                created: stats.birthtime,
+                path: `/api/screenshot/${encodeURIComponent(site)}/${encodeURIComponent(timestamp)}`
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    return screenshots.sort((a, b) => new Date(b.created) - new Date(a.created));
+    
+  } catch (error) {
+    logger.error(`Error getting screenshots: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Асинхронное получение статистики сервера
+ * @returns {Promise<Object>} Статистика сервера
+ */
+async function getServerStats() {
+  try {
+    const screenshots = await getAllScreenshots();
+    const totalSize = screenshots.reduce((sum, shot) => sum + shot.size, 0);
+    const sites = [...new Set(screenshots.map(shot => shot.site))];
+    
+    return {
+      totalScreenshots: screenshots.length,
+      totalSites: sites.length,
+      totalSize: totalSize,
+      oldestScreenshot: screenshots.length > 0 ? screenshots[screenshots.length - 1].created : null,
+      newestScreenshot: screenshots.length > 0 ? screenshots[0].created : null
+    };
+  } catch (error) {
+    logger.error(`Error getting server stats: ${error.message}`);
+    throw error;
+  }
+}
+
+// Middleware для логирования всех входящих запросов
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    logger.info(`${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
+    metrics.countRequest();
+  });
+  
+  next();
+});
+
+// Настройка CORS для безопасной работы с внешними запросами
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Разрешаем запросы без origin (например, из мобильных приложений)
+    // и запросы с localhost, 127.0.0.1, а также с внешних IP
+    const allowedOrigins = [
+      /^https?:\/\/localhost(:\d+)?$/,
+      /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+      /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/,
+      /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/,
+      /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?$/
+    ];
+    
+    if (!origin || allowedOrigins.some(pattern => pattern.test(origin))) {
+      callback(null, true);
+    } else {
+      logger.warn(`CORS: Блокирован запрос с origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// API Routes
+
+/**
+ * GET /api/screenshots - Получение списка всех скриншотов
+ */
+app.get('/api/screenshots', async (req, res) => {
+  try {
+    const screenshots = await getAllScreenshots();
+    res.json({
+      success: true,
+      data: screenshots,
+      count: screenshots.length
+    });
+  } catch (error) {
+    logger.error(`API Error - /api/screenshots: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load screenshots',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/screenshot/:site/:timestamp - Получение конкретного скриншота
+ */
+app.get('/api/screenshot/:site/:timestamp', async (req, res) => {
+  try {
+    const { site, timestamp } = req.params;
+    
+    // Валидация параметров
+    const validatedParams = screenshotQuerySchema.parse({
+      site: decodeURIComponent(site),
+      timestamp: decodeURIComponent(timestamp)
+    });
+    
+    const screenshotPath = path.join(RESULTS_DIR, validatedParams.site, validatedParams.timestamp, 'screenshot.png');
+    
+    if (fsSync.existsSync(screenshotPath)) {
+      // Установка правильных заголовков для кеширования
+      res.set({
+        'Content-Type': 'image/png',
+        'Cache-Control': 'public, max-age=3600',
+        'ETag': `"${validatedParams.site}-${validatedParams.timestamp}"`
+      });
+      
+      res.sendFile(path.resolve(screenshotPath));
+    } else {
+      res.status(404).json({
+        success: false,
+        error: 'Screenshot not found',
+        site: validatedParams.site,
+        timestamp: validatedParams.timestamp
+      });
+    }
+  } catch (error) {
+    logger.error(`API Error - /api/screenshot: ${error.message}`);
+    res.status(400).json({
+      success: false,
+      error: 'Invalid request parameters',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/stats - Получение статистики сервера
+ */
+app.get('/api/stats', async (req, res) => {
+  try {
+    const stats = await getServerStats();
+    const externalIp = await getExternalIp();
+    const cacheInfo = getCacheInfo();
+    
+    res.json({
+      success: true,
+      data: {
+        server: stats,
+        network: {
+          externalIp: externalIp.ip,
+          provider: externalIp.provider,
+          lastUpdated: externalIp.timestamp
+        },
+        cache: cacheInfo
+      }
+    });
+  } catch (error) {
+    logger.error(`API Error - /api/stats: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load server stats',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/config - Обновление конфигурации
+ */
+app.post('/api/config', async (req, res) => {
+  try {
+    const validatedConfig = validateConfig(req.body);
+    const updatedConfig = await updateConfig(validatedConfig);
+    
+    logger.info(`Configuration updated: ${JSON.stringify(validatedConfig)}`);
+    
+    res.json({
+      success: true,
+      data: updatedConfig,
+      message: 'Configuration updated successfully'
+    });
+  } catch (error) {
+    logger.error(`API Error - /api/config: ${error.message}`);
+    res.status(400).json({
+      success: false,
+      error: 'Invalid configuration',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /api/cache - Очистка кеша
+ */
+app.delete('/api/cache', async (req, res) => {
+  try {
+    await clearCache();
+    logger.info('Cache cleared successfully');
+    
+    res.json({
+      success: true,
+      message: 'Cache cleared successfully'
+    });
+  } catch (error) {
+    logger.error(`API Error - /api/cache: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear cache',
+      message: error.message
+    });
+  }
+});
+
+// Главная страница с современным интерфейсом
+app.get('/', async (req, res) => {
+  try {
+    const stats = await getServerStats();
+    
+    const html = templateRenderer.render('index', {
+      title: '📸 Screenshot Viewer',
+      stats,
+      serverPort: PORT,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.send(html);
+    metrics.countRequest();
+  } catch (error) {
+    logger.error(`Error rendering main page: ${error.message}`);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Error - Screenshot Viewer</title>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; margin: 40px; text-align: center; }
+          .error { color: #d32f2f; background: #ffebee; padding: 20px; border-radius: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="error">
+          <h1>🚫 Server Error</h1>
+          <p>Unable to load the application. Please check the server logs.</p>
+          <p><small>Error: ${error.message}</small></p>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+});
+
+// Статические файлы
+app.use('/static', express.static(path.join(__dirname, 'public')));
+app.use('/results', express.static(RESULTS_DIR));
+
+// Health check endpoint
+app.get('/health', async (req, res) => {
+  try {
+    const stats = await getServerStats();
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      stats
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'unhealthy',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method
+  });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  logger.error(`Unexpected error: ${err.message}`);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+  });
+});
+
+/**
+ * Асинхронный запуск сервера
+ * @returns {Promise<void>}
+ */
+async function startServer() {
+  try {
+    const server = app.listen(PORT, () => {
+      logger.info(`🌐 Server started successfully on http://localhost:${PORT}`);
+      logger.info(`📁 Results directory: ${RESULTS_DIR}`);
+      logger.info(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+    });
+
+    // Graceful shutdown
+    const gracefulShutdown = () => {
+      logger.info('🛑 Received shutdown signal, closing server...');
+      server.close(() => {
+        logger.info('✅ Server closed successfully');
+        process.exit(0);
+      });
+    };
+
+    process.on('SIGTERM', gracefulShutdown);
+    process.on('SIGINT', gracefulShutdown);
+
+    // Handle uncaught exceptions
+    process.on('uncaughtException', (error) => {
+      logger.error(`Uncaught Exception: ${error.message}`);
+      logger.error(error.stack);
+      process.exit(1);
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
+    });
+
+  } catch (error) {
+    logger.error(`Failed to start server: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+// Запуск сервера
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  app,
+  startServer,
+  getAllScreenshots,
+  getServerStats,
+  validateConfig
+};

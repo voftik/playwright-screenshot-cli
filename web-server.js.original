@@ -1,0 +1,350 @@
+// Загружаем переменные окружения и зависимости для DevOps
+require("dotenv").config();
+const logger = require("./lib/logger");
+const metrics = require("./lib/metrics");
+const TemplateRenderer = require("./lib/templateRenderer");
+const templateRenderer = new TemplateRenderer();
+
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const { getExternalIp, getConfig, updateConfig, clearCache, getCacheInfo } = require('./lib/getExternalIp');
+
+const app = express();
+const PORT = process.env.PORT || 9000;
+const RESULTS_DIR = path.join(__dirname, 'results');
+
+// Middleware для логирования всех входящих запросов
+
+// Настройка CORS для безопасной работы с внешними запросами
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Разрешаем запросы без origin (например, из мобильных приложений)
+        // и запросы с localhost, 127.0.0.1, а также с внешних IP
+        const allowedOrigins = [
+            /^https?:\/\/localhost(:\d+)?$/,
+            /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+            /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/,
+            /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/,
+            /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?$/
+        ];
+        
+        if (!origin || allowedOrigins.some(pattern => pattern.test(origin))) {
+            callback(null, true);
+        } else {
+            // Разрешаем запросы с внешних IP, полученных через getExternalIp
+//             getExternalIp().then(ipInfo => {
+//                 const externalIpPattern = new RegExp(`^https?://${ipInfo.ip.replace(/\./g, '\\.')}(:\\d+)?$`);
+//                 if (externalIpPattern.test(origin)) {
+//                     callback(null, true);
+//                 } else {
+//                     console.warn(`CORS: Блокирован запрос с origin: ${origin}`);
+//                     callback(new Error('Not allowed by CORS'));
+//                 }
+//             }).catch(() => {
+//                 console.warn(`CORS: Не удалось проверить внешний IP для origin: ${origin}`);
+//                 callback(new Error('Not allowed by CORS'));
+//             });
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
+app.use(cors(corsOptions));
+
+// Подключаем сбор метрик
+app.use(metrics.middleware);
+
+// Middleware для обработки JSON
+app.use(express.json());
+
+// Middleware для получения реального IP клиента
+app.use((req, res, next) => {
+    req.clientIp = req.headers['x-forwarded-for'] || 
+                   req.headers['x-real-ip'] || 
+                   req.connection.remoteAddress || 
+                   req.socket.remoteAddress ||
+                   (req.connection.socket ? req.connection.socket.remoteAddress : null);
+    next();
+});
+
+// Создаем директорию results если её нет
+if (!fs.existsSync(RESULTS_DIR)) {
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+}
+
+// Статические файлы
+app.use('/static', express.static(RESULTS_DIR));
+
+// Функция для получения базового URL с динамическим IP
+async function getBaseUrl(req) {
+    try {
+        // Сначала пробуем использовать Host заголовок из запроса
+        if (req.get('Host')) {
+            const protocol = req.secure || req.get('X-Forwarded-Proto') === 'https' ? 'https' : 'http';
+            return `${protocol}://${req.get('Host')}`;
+        }
+        
+        // Если Host заголовок недоступен, используем внешний IP
+        const ipInfo = await getExternalIp();
+        const protocol = req.secure ? 'https' : 'http';
+        const port = PORT !== 80 && PORT !== 443 ? `:${PORT}` : '';
+        return `${protocol}://${ipInfo.ip}${port}`;
+    } catch (error) {
+        console.warn('Не удалось определить базовый URL, используем localhost:', error.message);
+        const protocol = req.secure ? 'https' : 'http';
+        const port = PORT !== 80 && PORT !== 443 ? `:${PORT}` : '';
+        return `${protocol}://localhost${port}`;
+    }
+}
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+    const uptime = process.uptime();
+    const memUsage = process.memoryUsage();
+    
+    res.status(200).json({
+        status: "UP",
+        timestamp: new Date().toISOString(),
+        uptime: `${Math.floor(uptime)}s`,
+        memory: {
+            rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
+            heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+            heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`
+        },
+        environment: process.env.NODE_ENV || "development"
+    });
+});
+
+// Metrics endpoint для Prometheus
+app.get("/metrics", async (req, res) => {
+    res.set("Content-Type", metrics.getRegister().contentType);
+    res.end(await metrics.getMetrics());
+});
+
+
+// API эндпоинт для получения внешнего IP
+app.get('/api/external-ip', async (req, res) => {
+    try {
+        const forceRefresh = req.query.force === 'true';
+        const result = await getExternalIp({ forceRefresh });
+        const baseUrl = await getBaseUrl(req);
+        
+        res.json({
+            success: true,
+            data: {
+                ...result,
+                baseUrl: baseUrl,
+                serverInfo: {
+                    port: PORT,
+                    protocol: req.secure ? 'https' : 'http'
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Ошибка при получении внешнего IP:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API эндпоинт для получения информации о кеше
+app.get('/api/cache-info', (req, res) => {
+    try {
+        const cacheInfo = getCacheInfo();
+        res.json({
+            success: true,
+            data: cacheInfo
+        });
+    } catch (error) {
+        console.error('Ошибка при получении информации о кеше:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API эндпоинт для очистки кеша
+app.post('/api/cache/clear', (req, res) => {
+    try {
+        clearCache();
+        res.json({
+            success: true,
+            message: 'Кеш очищен'
+        });
+    } catch (error) {
+        console.error('Ошибка при очистке кеша:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API эндпоинт для получения конфигурации
+app.get('/api/config', async (req, res) => {
+    try {
+        const config = await getConfig();
+        res.json({
+            success: true,
+            data: config
+        });
+    } catch (error) {
+        console.error('Ошибка при получении конфигурации:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// API эндпоинт для обновления конфигурации
+app.post('/api/config', async (req, res) => {
+    try {
+        const newConfig = await updateConfig(req.body);
+        res.json({
+            success: true,
+            data: newConfig
+        });
+    } catch (error) {
+        console.error('Ошибка при обновлении конфигурации:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Главная страница
+// Главная страница с использованием EJS шаблонов
+app.get("/", async (req, res) => {
+    try {
+        const domainsRaw = fs.readdirSync(RESULTS_DIR, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name);
+
+        // Получаем внешний IP и базовый URL для отображения в интерфейсе
+        let externalIpInfo = null;
+        let baseUrl = null;
+        try {
+            externalIpInfo = await getExternalIp();
+            baseUrl = await getBaseUrl(req);
+        } catch (error) {
+            logger.warn("Failed to get external IP for dashboard", { error: error.message });
+        }
+
+        // Подготавливаем данные для шаблона
+        const templateData = {
+            domainsRaw,
+            externalIpInfo,
+            baseUrl,
+            resultsDir: RESULTS_DIR
+        };
+
+        // Рендерим страницу с помощью EJS
+        const html = await templateRenderer.renderDashboard(templateData);
+        res.send(html);
+    } catch (error) {
+        logger.error("Error rendering dashboard", { error: error.message, stack: error.stack });
+        res.status(500).send(`Ошибка: ${error.message}`);
+    }
+});
+// Просмотр конкретной сессии (оригинальный код)
+
+// Обработка ошибок 404
+app.use((req, res) => {
+    logger.warn('404 - Page not found', { 
+        method: req.method, 
+        url: req.originalUrl, 
+        ip: req.clientIp 
+    });
+    res.status(404).json({
+        success: false,
+        error: 'Эндпоинт не найден',
+        method: req.method,
+        path: req.originalUrl
+    });
+});
+
+// Глобальный обработчик ошибок
+app.use((err, req, res, next) => {
+    logger.error('Server error', { 
+        error: err.message, 
+        stack: err.stack,
+        url: req.originalUrl,
+        method: req.method
+    });
+    res.status(500).json({
+        success: false,
+        error: 'Внутренняя ошибка сервера',
+        details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+});
+
+// Graceful shutdown
+function gracefulShutdown(signal) {
+    logger.info('Received shutdown signal', { signal });
+    
+    const shutdownTimeout = parseInt(process.env.SHUTDOWN_TIMEOUT) || 30000;
+    
+    setTimeout(() => {
+        logger.error('Forced shutdown due to timeout');
+        process.exit(1);
+    }, shutdownTimeout);
+    
+    logger.info('Shutting down gracefully');
+    // process.exit(0); // Will exit after timeout
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Обработка необработанных ошибок
+process.on('uncaughtException', (error) => {
+    logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection', { reason, promise });
+    process.exit(1);
+});
+
+// Запуск сервера
+const server = app.listen(PORT, '0.0.0.0', () => {
+    logger.info('Screenshots web server started', {
+        port: PORT,
+        host: '0.0.0.0',
+        environment: process.env.NODE_ENV || 'development',
+        resultsDir: RESULTS_DIR
+    });
+    
+    console.log(`🌐 Screenshots web server запущен на http://0.0.0.0:${PORT}`);
+    console.log('📋 DevOps функции:');
+    console.log('   - Структурированное логирование (Winston)');
+    console.log('   - Health check: /health');
+    console.log('   - Prometheus метрики: /metrics');
+    console.log('   - Graceful shutdown');
+    console.log('   - Переменные окружения (.env)');
+    console.log('   - Улучшенный UI с EJS шаблонами');
+    
+    // Логируем внешний IP при запуске
+//     getExternalIp().then(ipInfo => {
+//         logger.externalIp(ipInfo);
+//         metrics.recordExternalIpCheck(ipInfo.source, false);
+//         console.log(`🔗 Внешний IP: ${ipInfo.ip} (источник: ${ipInfo.source})`);
+//         console.log(`🌍 Внешний доступ: http://${ipInfo.ip}:${PORT}`);
+//     }).catch(error => {
+//         logger.warn('Failed to get external IP on startup', { error: error.message });
+
+module.exports = { app, server };
+    // Логируем внешний IP при запуске (закомментировано для стабильной работы)
+    console.log('🔗 Внешний IP будет определен при первом запросе');
+});
+

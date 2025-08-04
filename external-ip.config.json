@@ -1,0 +1,13 @@
+{
+  "cacheTtl": 60000,
+  "timeout": 5000,
+  "fallbackServices": [
+    "https://httpbin.org/ip",
+    "https://icanhazip.com",
+    "https://ifconfig.me/ip",
+    "https://api.ipify.org"
+  ],
+  "customIp": null,
+  "description": "Конфигурация для модуля определения внешнего IP",
+  "version": "1.0.0"
+}

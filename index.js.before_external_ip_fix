@@ -1,0 +1,585 @@
+#!/usr/bin/env node
+
+/**
+ * Playwright Screenshot CLI with Web Server
+ * 
+ * CLI инструмент для создания скриншотов веб-страниц с веб-интерфейсом для просмотра
+ */
+
+const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
+const { program } = require('commander');
+const chalk = require('chalk');
+const express = require('express');
+const http = require('http');
+
+// Функция валидации URL
+function isValidUrl(string) {
+  try {
+    const url = new URL(string);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
+// Функция нормализации URL
+function normalizeUrl(url) {
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return 'https://' + url;
+  }
+  return url;
+}
+
+// Функция получения имени сайта из URL
+function getSiteName(url) {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname.replace(/^www\./, '');
+  } catch (error) {
+    return url.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
+  }
+}
+
+// Функция создания HTML страницы для просмотра скриншотов
+function generateViewerHTML(screenshotsDir, siteName, timestamp) {
+  const resultsPath = path.join(screenshotsDir, siteName, timestamp);
+  
+  if (!fs.existsSync(resultsPath)) {
+    return '<h1>Скриншоты не найдены</h1>';
+  }
+
+  const files = fs.readdirSync(resultsPath).filter(file => file.endsWith('.png'));
+  files.sort();
+
+  const fullPageFile = files.find(f => f.includes('full_page'));
+  const viewportFiles = files.filter(f => f.includes('viewport')).sort();
+
+  let html = `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Скриншоты - ${siteName}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section h2 {
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .screenshot-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .screenshot-item {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+        
+        .screenshot-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .screenshot-item img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            object-position: top;
+        }
+        
+        .screenshot-info {
+            padding: 15px;
+            background: #f9f9f9;
+        }
+        
+        .screenshot-info h3 {
+            margin: 0 0 5px 0;
+            color: #333;
+        }
+        
+        .screenshot-info p {
+            margin: 0;
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        .download-btn {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 0.9em;
+            transition: background 0.2s;
+        }
+        
+        .download-btn:hover {
+            background: #5a67d8;
+        }
+        
+        .full-page-section img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        
+        .stats {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📸 Скриншоты</h1>
+            <p>Сайт: <strong>${siteName}</strong> | Время: ${timestamp.replace(/_/g, ':').replace('T', ' ')}</p>
+        </div>
+        
+        <div class="content">
+            <div class="stats">
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-number">${files.length}</div>
+                        <div class="stat-label">Всего скриншотов</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">${viewportFiles.length}</div>
+                        <div class="stat-label">Поэкранных</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">1</div>
+                        <div class="stat-label">Полная страница</div>
+                    </div>
+                </div>
+            </div>`;
+
+  if (fullPageFile) {
+    const stats = fs.statSync(path.join(resultsPath, fullPageFile));
+    html += `
+            <div class="section">
+                <h2>🖼️ Полная страница</h2>
+                <div class="full-page-section">
+                    <img src="/screenshot/${siteName}/${timestamp}/${fullPageFile}" alt="Полный скриншот">
+                    <div style="margin-top: 15px;">
+                        <strong>Размер файла:</strong> ${(stats.size / 1024).toFixed(1)} KB |
+                        <a href="/download/${siteName}/${timestamp}/${fullPageFile}" class="download-btn">💾 Скачать</a>
+                    </div>
+                </div>
+            </div>`;
+  }
+
+  if (viewportFiles.length > 0) {
+    html += `
+            <div class="section">
+                <h2>📺 Поэкранные скриншоты</h2>
+                <div class="screenshot-grid">`;
+    
+    viewportFiles.forEach(file => {
+      const stats = fs.statSync(path.join(resultsPath, file));
+      html += `
+                    <div class="screenshot-item">
+                        <img src="/screenshot/${siteName}/${timestamp}/${file}" alt="${file}">
+                        <div class="screenshot-info">
+                            <h3>${file}</h3>
+                            <p>Размер: ${(stats.size / 1024).toFixed(1)} KB</p>
+                            <a href="/download/${siteName}/${timestamp}/${file}" class="download-btn">💾 Скачать</a>
+                        </div>
+                    </div>`;
+    });
+    
+    html += `
+                </div>
+            </div>`;
+  }
+
+  html += `
+        </div>
+    </div>
+</body>
+</html>`;
+
+  return html;
+}
+
+// Функция запуска веб-сервера
+function startWebServer(resultsDir, port = 3000) {
+  const app = express();
+  
+  // Главная страница со списком всех скриншотов
+  app.get('/', (req, res) => {
+    if (!fs.existsSync(resultsDir)) {
+      res.send('<h1>Папка со скриншотами не найдена</h1>');
+      return;
+    }
+
+    const sites = fs.readdirSync(resultsDir).filter(item => {
+      return fs.statSync(path.join(resultsDir, item)).isDirectory();
+    });
+
+    let html = `
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playwright Screenshot Gallery</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .header h1 { color: #333; font-size: 3em; margin-bottom: 10px; }
+        .site-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .site-card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .site-card h2 { color: #667eea; margin-top: 0; }
+        .timestamp-list { list-style: none; padding: 0; }
+        .timestamp-list li { margin: 10px 0; }
+        .timestamp-list a { color: #333; text-decoration: none; padding: 8px 12px; background: #f8f9fa; border-radius: 4px; display: block; }
+        .timestamp-list a:hover { background: #e9ecef; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📸 Screenshot Gallery</h1>
+            <p>Все созданные скриншоты</p>
+        </div>
+        <div class="site-grid">`;
+
+    sites.forEach(site => {
+      const sitePath = path.join(resultsDir, site);
+      const timestamps = fs.readdirSync(sitePath).filter(item => {
+        return fs.statSync(path.join(sitePath, item)).isDirectory();
+      }).sort().reverse();
+
+      html += `
+            <div class="site-card">
+                <h2>🌐 ${site}</h2>
+                <ul class="timestamp-list">`;
+      
+      timestamps.forEach(timestamp => {
+        const displayTime = timestamp.replace(/_/g, ':').replace('T', ' ');
+        html += `<li><a href="/view/${site}/${timestamp}">📅 ${displayTime}</a></li>`;
+      });
+      
+      html += `
+                </ul>
+            </div>`;
+    });
+
+    html += `
+        </div>
+    </div>
+</body>
+</html>`;
+
+    res.send(html);
+  });
+
+  // Просмотр конкретного набора скриншотов
+  app.get('/view/:site/:timestamp', (req, res) => {
+    const { site, timestamp } = req.params;
+    const html = generateViewerHTML(resultsDir, site, timestamp);
+    res.send(html);
+  });
+
+  // Отдача скриншотов
+  app.get('/screenshot/:site/:timestamp/:filename', (req, res) => {
+    const { site, timestamp, filename } = req.params;
+    const filePath = path.join(resultsDir, site, timestamp, filename);
+    
+    if (fs.existsSync(filePath)) {
+      res.sendFile(path.resolve(filePath));
+    } else {
+      res.status(404).send('Файл не найден');
+    }
+  });
+
+  // Скачивание скриншотов
+  app.get('/download/:site/:timestamp/:filename', (req, res) => {
+    const { site, timestamp, filename } = req.params;
+    const filePath = path.join(resultsDir, site, timestamp, filename);
+    
+    if (fs.existsSync(filePath)) {
+      res.download(filePath);
+    } else {
+      res.status(404).send('Файл не найден');
+    }
+  });
+
+  const server = http.createServer(app);
+  
+  return new Promise((resolve, reject) => {
+    server.listen(port, (err) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve({ server, port });
+      }
+    });
+  });
+}
+
+// Конфигурация CLI команд
+program
+  .name('screenshot')
+  .description('CLI tool for taking webpage screenshots using Playwright with web viewer')
+  .version('1.1.0')
+  .argument('<url>', 'URL веб-страницы для скриншота')
+  .option('-d, --dir <directory>', 'Каталог для сохранения результатов', 'results')
+  .option('-t, --timeout <ms>', 'Таймаут для загрузки страницы в миллисекундах', '30000')
+  .option('-w, --wait <ms>', 'Задержка между скриншотами в миллисекундах', '500')
+  .option('-s, --server', 'Запустить веб-сервер для просмотра скриншотов', false)
+  .option('-p, --port <number>', 'Порт для веб-сервера', '3000')
+  .action((url, options) => {
+    captureScreenshots(url, options);
+  });
+
+// Основная функция создания скриншотов
+async function captureScreenshots(url, options) {
+  const startTime = Date.now();
+  
+  try {
+    // Валидация и нормализация URL
+    const normalizedUrl = normalizeUrl(url);
+    if (!isValidUrl(normalizedUrl)) {
+      throw new Error(`Неверный URL: ${url}. Используйте формат: https://example.com`);
+    }
+
+    console.log(chalk.blue('🚀 Запуск Playwright Screenshot CLI'));
+    console.log(chalk.blue(`🌐 URL: ${normalizedUrl}`));
+    console.log(chalk.gray(`📁 Директория: ${options.dir}`));
+    console.log(chalk.gray(`⏱️  Таймаут: ${options.timeout}ms`));
+
+    // Создание структуры директорий
+    const timestamp = new Date().toISOString().replace(/[-:.]/g, "_").slice(0, -5) + "Z";
+    const siteName = getSiteName(normalizedUrl);
+    const savePath = path.join(options.dir, siteName, timestamp);
+    
+    console.log(chalk.yellow('📁 Создание директории...'));
+    try {
+      fs.mkdirSync(savePath, { recursive: true });
+    } catch (error) {
+      throw new Error(`Не удалось создать директорию ${savePath}: ${error.message}`);
+    }
+
+    // Запуск браузера
+    console.log(chalk.yellow('⏳ Запуск браузера...'));
+    const browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
+    const page = await browser.newPage();
+    
+    // Настройка таймаутов
+    page.setDefaultTimeout(parseInt(options.timeout));
+    page.setDefaultNavigationTimeout(parseInt(options.timeout));
+    
+    try {
+      // Переход на страницу
+      console.log(chalk.yellow('⏳ Переход на страницу...'));
+      await page.goto(normalizedUrl, { 
+        waitUntil: 'networkidle',
+        timeout: parseInt(options.timeout)
+      });
+
+      // Ожидание полной загрузки
+      console.log(chalk.yellow('⏳ Ожидание загрузки контента...'));
+      await page.waitForTimeout(2000);
+
+      // Полный скриншот
+      console.log(chalk.yellow('📸 Создание полного скриншота...'));
+      const fullPagePath = path.join(savePath, 'full_page.png');
+      await page.screenshot({ 
+        path: fullPagePath, 
+        fullPage: true,
+        type: 'png'
+      });
+      
+      const fullPageStats = fs.statSync(fullPagePath);
+      console.log(chalk.green(`✅ Полный скриншот: ${fullPagePath} (${(fullPageStats.size / 1024).toFixed(1)} KB)`));
+      
+      // Поэкранные скриншоты
+      console.log(chalk.yellow('📺 Создание поэкранных скриншотов...'));
+      const viewportSize = page.viewportSize();
+      const viewportHeight = viewportSize.height;
+      let scrollY = 0;
+      let index = 0;
+      let documentHeight = await page.evaluate(() => Math.max(
+        document.body.scrollHeight,
+        document.body.offsetHeight,
+        document.documentElement.clientHeight,
+        document.documentElement.scrollHeight,
+        document.documentElement.offsetHeight
+      ));
+
+      // Сброс прокрутки в начало
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(parseInt(options.wait));
+
+      while (scrollY < documentHeight) {
+        const viewportPath = path.join(savePath, `viewport_${index.toString().padStart(2, '0')}.png`);
+        await page.screenshot({ 
+          path: viewportPath,
+          type: 'png'
+        });
+        
+        const viewportStats = fs.statSync(viewportPath);
+        console.log(chalk.gray(`  📱 viewport_${index.toString().padStart(2, '0')}.png (${(viewportStats.size / 1024).toFixed(1)} KB)`));
+        
+        index++;
+        scrollY += viewportHeight;
+        
+        if (scrollY < documentHeight) {
+          await page.evaluate(_scrollY => window.scrollTo(0, _scrollY), scrollY);
+          await page.waitForTimeout(parseInt(options.wait));
+          
+          // Обновляем высоту документа (может измениться после прокрутки)
+          documentHeight = await page.evaluate(() => Math.max(
+            document.body.scrollHeight,
+            document.body.offsetHeight,
+            document.documentElement.clientHeight,
+            document.documentElement.scrollHeight,
+            document.documentElement.offsetHeight
+          ));
+        }
+      }
+
+      await browser.close();
+      
+      const endTime = Date.now();
+      const duration = ((endTime - startTime) / 1000).toFixed(1);
+      
+      console.log(chalk.green('✅ Все скриншоты успешно созданы!'));
+      console.log(chalk.blue(`📂 Результаты сохранены в: ${savePath}`));
+      console.log(chalk.blue(`⏱️  Время выполнения: ${duration}s`));
+      console.log(chalk.blue(`📊 Создано скриншотов: ${index + 1} (1 полный + ${index} поэкранных)`));
+      
+      // Запуск веб-сервера если указана опция
+      if (options.server) {
+        console.log(chalk.yellow('🌐 Запуск веб-сервера...'));
+        try {
+          const { port } = await startWebServer(options.dir, parseInt(options.port));
+          console.log(chalk.green(`🎉 Веб-сервер запущен!`));
+          console.log(chalk.blue(`🔗 Открыть в браузере: http://localhost:${port}`));
+          console.log(chalk.blue(`📋 Прямая ссылка на скриншоты: http://localhost:${port}/view/${siteName}/${timestamp}`));
+          console.log(chalk.gray('💡 Нажмите Ctrl+C для остановки сервера'));
+        } catch (error) {
+          console.error(chalk.red('❌ Ошибка запуска веб-сервера:'), error.message);
+        }
+      } else {
+        console.log(chalk.gray('💡 Для просмотра в браузере используйте опцию --server'));
+      }
+      
+    } catch (pageError) {
+      await browser.close();
+      throw pageError;
+    }
+    
+  } catch (error) {
+    console.error(chalk.red('❌ Ошибка:'), error.message);
+    
+    // Специфичные советы по типам ошибок
+    if (error.message.includes('net::ERR_NAME_NOT_RESOLVED')) {
+      console.log(chalk.yellow('💡 Совет: Проверьте правильность URL и интернет-соединение'));
+    } else if (error.message.includes('Timeout')) {
+      console.log(chalk.yellow('💡 Совет: Увеличьте таймаут с помощью опции --timeout'));
+    } else if (error.message.includes('EACCES') || error.message.includes('EPERM')) {
+      console.log(chalk.yellow('💡 Совет: Проверьте права доступа к директории'));
+    }
+    
+    process.exit(1);
+  }
+}
+
+// Обработка необработанных исключений
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(chalk.red('❌ Необработанная ошибка:'), reason);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error(chalk.red('❌ Критическая ошибка:'), error);
+  process.exit(1);
+});
+
+// Парсинг аргументов командной строки
+program.parse(process.argv);

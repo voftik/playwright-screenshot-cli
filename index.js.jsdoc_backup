@@ -1,0 +1,418 @@
+#!/usr/bin/env node
+
+/**
+ * Playwright Screenshot CLI with Web Server
+ * 
+ * CLI инструмент для создания скриншотов веб-страниц с веб-интерфейсом для просмотра
+ * Модернизированная версия с TypeScript типизацией через JSDoc, async/await и валидацией
+ */
+
+const { chromium } = require('playwright');
+const fs = require('fs').promises;
+const fsSync = require('fs');
+const path = require('path');
+const { program } = require('commander');
+const chalk = require('chalk');
+const express = require('express');
+const http = require('http');
+const { z } = require('zod');
+
+// Схемы валидации с zod
+const urlSchema = z.string().url();
+const screenshotOptionsSchema = z.object({
+  width: z.number().min(100).max(5000).optional(),
+  height: z.number().min(100).max(5000).optional(),
+  timeout: z.number().min(1000).max(60000).optional(),
+  fullPage: z.boolean().optional(),
+  quality: z.number().min(1).max(100).optional()
+});
+
+/**
+ * Типизированные интерфейсы через JSDoc
+ * @typedef {Object} ScreenshotOptions
+ * @property {number} [width=1920] - Ширина viewport
+ * @property {number} [height=1080] - Высота viewport  
+ * @property {number} [timeout=30000] - Таймаут в миллисекундах
+ * @property {boolean} [fullPage=true] - Скриншот всей страницы
+ * @property {number} [quality=90] - Качество изображения (1-100)
+ */
+
+/**
+ * @typedef {Object} ScreenshotResult
+ * @property {boolean} success - Успешность операции
+ * @property {string} [path] - Путь к файлу скриншота
+ * @property {string} [error] - Сообщение об ошибке
+ * @property {number} fileSize - Размер файла в байтах
+ * @property {number} duration - Время выполнения в миллисекундах
+ */
+
+/**
+ * Валидация URL с использованием zod
+ * @param {string} url - URL для валидации
+ * @returns {boolean} Результат валидации
+ */
+function isValidUrl(url) {
+  try {
+    urlSchema.parse(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Валидация опций скриншота
+ * @param {ScreenshotOptions} options - Опции для валидации
+ * @returns {ScreenshotOptions} Валидированные опции
+ * @throws {Error} Ошибка валидации
+ */
+function validateScreenshotOptions(options) {
+  try {
+    return screenshotOptionsSchema.parse(options);
+  } catch (error) {
+    throw new Error(`Invalid screenshot options: ${error.message}`);
+  }
+}
+
+/**
+ * Нормализация URL
+ * @param {string} url - URL для нормализации
+ * @returns {string} Нормализованный URL
+ */
+function normalizeUrl(url) {
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    return 'https://' + url;
+  }
+  return url;
+}
+
+/**
+ * Получение имени сайта из URL
+ * @param {string} url - URL
+ * @returns {string} Имя сайта
+ */
+function getSiteName(url) {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname.replace(/^www\./, '');
+  } catch (error) {
+    return url.replace(/^(?:https?:\/\/)?(?:www\.)?/i, "").split('/')[0];
+  }
+}
+
+/**
+ * Асинхронное создание скриншота
+ * @param {string} url - URL страницы
+ * @param {ScreenshotOptions} options - Опции скриншота
+ * @returns {Promise<ScreenshotResult>} Результат создания скриншота
+ */
+async function takeScreenshot(url, options = {}) {
+  const startTime = Date.now();
+  
+  try {
+    // Валидация входных данных
+    if (!isValidUrl(url)) {
+      throw new Error('Invalid URL provided');
+    }
+    
+    const validatedOptions = {
+      width: 1920,
+      height: 1080,
+      timeout: 30000,
+      fullPage: true,
+      quality: 90,
+      ...validateScreenshotOptions(options)
+    };
+
+    const normalizedUrl = normalizeUrl(url);
+    const siteName = getSiteName(normalizedUrl);
+    const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0];
+    
+    // Создание директорий
+    const resultsDir = path.join(__dirname, 'results', siteName, timestamp);
+    await fs.mkdir(resultsDir, { recursive: true });
+    
+    const screenshotPath = path.join(resultsDir, 'screenshot.png');
+    
+    console.log(chalk.blue(`📸 Создание скриншота: ${normalizedUrl}`));
+    console.log(chalk.gray(`📁 Сохранение в: ${screenshotPath}`));
+    
+    // Запуск браузера и создание скриншота
+    const browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-dev-shm-usage']
+    });
+    
+    try {
+      const context = await browser.newContext({
+        viewport: { 
+          width: validatedOptions.width, 
+          height: validatedOptions.height 
+        },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      });
+      
+      const page = await context.newPage();
+      
+      // Установка таймаута
+      page.setDefaultTimeout(validatedOptions.timeout);
+      
+      await page.goto(normalizedUrl, { 
+        waitUntil: 'networkidle',
+        timeout: validatedOptions.timeout 
+      });
+      
+      // Ожидание полной загрузки страницы
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForTimeout(2000);
+      
+      await page.screenshot({
+        path: screenshotPath,
+        fullPage: validatedOptions.fullPage,
+        quality: validatedOptions.quality,
+        type: 'png'
+      });
+      
+      await context.close();
+      
+      // Получение размера файла
+      const stats = await fs.stat(screenshotPath);
+      const duration = Date.now() - startTime;
+      
+      console.log(chalk.green(`✅ Скриншот создан успешно!`));
+      console.log(chalk.gray(`📊 Размер файла: ${(stats.size / 1024).toFixed(2)} KB`));
+      console.log(chalk.gray(`⏱️  Время выполнения: ${duration}ms`));
+      
+      return {
+        success: true,
+        path: screenshotPath,
+        fileSize: stats.size,
+        duration
+      };
+      
+    } finally {
+      await browser.close();
+    }
+    
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    console.error(chalk.red(`❌ Ошибка создания скриншота: ${error.message}`));
+    
+    return {
+      success: false,
+      error: error.message,
+      fileSize: 0,
+      duration
+    };
+  }
+}
+
+/**
+ * Асинхронное создание веб-сервера для просмотра результатов
+ * @param {number} port - Порт сервера
+ * @returns {Promise<http.Server>} HTTP сервер
+ */
+async function createWebServer(port = 3000) {
+  const app = express();
+  const resultsDir = path.join(__dirname, 'results');
+  
+  // Middleware
+  app.use(express.static(resultsDir));
+  app.use(express.json());
+  
+  // API endpoint для получения списка скриншотов
+  app.get('/api/screenshots', async (req, res) => {
+    try {
+      const sites = await fs.readdir(resultsDir);
+      const screenshots = [];
+      
+      for (const site of sites) {
+        const sitePath = path.join(resultsDir, site);
+        const siteStats = await fs.stat(sitePath);
+        
+        if (siteStats.isDirectory()) {
+          const timestamps = await fs.readdir(sitePath);
+          
+          for (const timestamp of timestamps) {
+            const timestampPath = path.join(sitePath, timestamp);
+            const timestampStats = await fs.stat(timestampPath);
+            
+            if (timestampStats.isDirectory()) {
+              const screenshotPath = path.join(timestampPath, 'screenshot.png');
+              
+              if (fsSync.existsSync(screenshotPath)) {
+                const stats = await fs.stat(screenshotPath);
+                screenshots.push({
+                  site,
+                  timestamp,
+                  size: stats.size,
+                  created: stats.birthtime,
+                  path: `/api/screenshot/${site}/${timestamp}`
+                });
+              }
+            }
+          }
+        }
+      }
+      
+      res.json(screenshots);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  
+  // API endpoint для получения конкретного скриншота
+  app.get('/api/screenshot/:site/:timestamp', async (req, res) => {
+    try {
+      const { site, timestamp } = req.params;
+      const screenshotPath = path.join(resultsDir, site, timestamp, 'screenshot.png');
+      
+      if (fsSync.existsSync(screenshotPath)) {
+        res.sendFile(path.resolve(screenshotPath));
+      } else {
+        res.status(404).json({ error: 'Screenshot not found' });
+      }
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  
+  // Главная страница
+  app.get('/', (req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Screenshot Viewer</title>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .screenshot { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+          .screenshot img { max-width: 100%; height: auto; }
+          .meta { color: #666; font-size: 14px; margin-bottom: 10px; }
+        </style>
+      </head>
+      <body>
+        <h1>📸 Screenshot Viewer</h1>
+        <div id="screenshots">Loading...</div>
+        
+        <script>
+        async function loadScreenshots() {
+          try {
+            const response = await fetch('/api/screenshots');
+            const screenshots = await response.json();
+            
+            const container = document.getElementById('screenshots');
+            
+            if (screenshots.length === 0) {
+              container.innerHTML = '<p>No screenshots found.</p>';
+              return;
+            }
+            
+            container.innerHTML = screenshots
+              .sort((a, b) => new Date(b.created) - new Date(a.created))
+              .map(shot => \`
+                <div class="screenshot">
+                  <div class="meta">
+                    <strong>\${shot.site}</strong> - 
+                    \${new Date(shot.created).toLocaleString()} - 
+                    \${(shot.size / 1024).toFixed(2)} KB
+                  </div>
+                  <img src="\${shot.path}" alt="\${shot.site} screenshot" />
+                </div>
+              \`).join('');
+          } catch (error) {
+            document.getElementById('screenshots').innerHTML = 
+              \`<p>Error loading screenshots: \${error.message}</p>\`;
+          }
+        }
+        
+        loadScreenshots();
+        </script>
+      </body>
+      </html>
+    `);
+  });
+  
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        console.log(chalk.green(`🌐 Веб-сервер запущен на http://localhost:${port}`));
+        resolve(server);
+      }
+    });
+  });
+}
+
+// Настройка CLI команд
+program
+  .name('screenshot')
+  .description('CLI tool for taking webpage screenshots using Playwright')
+  .version('1.0.0');
+
+program
+  .command('take')
+  .description('Take a screenshot of a webpage')
+  .argument('<url>', 'URL to screenshot')
+  .option('-w, --width <number>', 'viewport width', '1920')
+  .option('-h, --height <number>', 'viewport height', '1080')
+  .option('-t, --timeout <number>', 'timeout in milliseconds', '30000')
+  .option('--no-full-page', 'disable full page screenshot')
+  .option('-q, --quality <number>', 'image quality (1-100)', '90')
+  .action(async (url, options) => {
+    const screenshotOptions = {
+      width: parseInt(options.width),
+      height: parseInt(options.height),
+      timeout: parseInt(options.timeout),
+      fullPage: options.fullPage,
+      quality: parseInt(options.quality)
+    };
+    
+    const result = await takeScreenshot(url, screenshotOptions);
+    
+    if (result.success) {
+      console.log(chalk.green(`Screenshot saved to: ${result.path}`));
+    } else {
+      console.error(chalk.red(`Failed to take screenshot: ${result.error}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('serve')
+  .description('Start web server to view screenshots')
+  .option('-p, --port <number>', 'port number', '3000')
+  .action(async (options) => {
+    const port = parseInt(options.port);
+    
+    try {
+      await createWebServer(port);
+      console.log(chalk.blue('Press Ctrl+C to stop the server'));
+      
+      // Graceful shutdown
+      process.on('SIGINT', () => {
+        console.log(chalk.yellow('\n👋 Shutting down server...'));
+        process.exit(0);
+      });
+      
+    } catch (error) {
+      console.error(chalk.red(`Failed to start server: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// Запуск CLI
+if (require.main === module) {
+  program.parse();
+}
+
+module.exports = {
+  takeScreenshot,
+  createWebServer,
+  isValidUrl,
+  validateScreenshotOptions,
+  normalizeUrl,
+  getSiteName
+};
