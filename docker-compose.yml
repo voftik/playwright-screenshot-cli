@@ -1,18 +1,41 @@
 version: '3.8'
 
 services:
-  playwright-screenshotter:
+  playwright-screenshot:
     build: .
     ports:
-      - "3000:3000"
+      - "9000:9000"
     volumes:
       - ./results:/app/results
+      - ./config:/app/config
     environment:
       - NODE_ENV=production
-      - EXTERNAL_IP=${EXTERNAL_IP:-127.0.0.1}
-    command: node server-only.js 3000
+      - PORT=9000
+      - HOST=0.0.0.0
+      - LOG_LEVEL=info
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
-networks:
-  default:
-    name: playwright-network
+  # Optional: Add nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - playwright-screenshot
+    restart: unless-stopped
+    profiles:
+      - with-nginx
+
+volumes:
+  results:
+  ssl:
