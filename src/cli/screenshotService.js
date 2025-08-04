@@ -6,6 +6,8 @@
 const playwright = require('playwright');
 const path = require('path');
 const chalk = require('chalk');
+const externalIpService = require('../utils/externalIp');
+const net = require('net');
 const cliProgress = require('cli-progress');
 
 const { validateScreenshotOptions, extractDomain } = require('../utils/validation');
@@ -95,7 +97,7 @@ class ScreenshotService {
       const duration = ((endTime - startTime) / 1000).toFixed(1);
 
       // Display success information
-      this.displaySuccessInfo(sessionDir, screenshots, duration);
+      await this.displaySuccessInfo(sessionDir, screenshots, duration);
       
       logger.info(`Screenshot session completed in ${duration}s`);
       
@@ -194,14 +196,97 @@ class ScreenshotService {
    * Display success information
    * @private
    */
-  displaySuccessInfo(sessionDir, screenshots, duration) {
+  async displaySuccessInfo(sessionDir, screenshots, duration) {
     const fullPageCount = screenshots.filter(s => s.type === 'full').length;
     const viewportCount = screenshots.filter(s => s.type === 'viewport').length;
     
+    // Get absolute server path
+    const absoluteServerPath = path.resolve(sessionDir);
+    
+    // Get external IP and potential web server port
+    let externalUrls = null;
+    try {
+      const ipInfo = await externalIpService.getExternalIp();
+      const activePort = await this.findActiveWebServerPort();
+      
+      if (activePort) {
+        const baseUrl = `http://${ipInfo.ip}:${activePort}`;
+        const pathParts = sessionDir.split(path.sep);
+        const domain = pathParts[pathParts.length - 2];
+        const timestamp = pathParts[pathParts.length - 1];
+        
+        externalUrls = {
+          mainPage: baseUrl,
+          sessionPage: `${baseUrl}/view/${domain}/${timestamp}`,
+          directImages: screenshots.map(screenshot => 
+            `${baseUrl}/${domain}/${timestamp}/${path.basename(screenshot.path)}`
+          )
+        };
+      }
+    } catch (error) {
+      logger.debug(`Could not determine external URLs: ${error.message}`);
+    }
+    
     console.log(chalk.green.bold('\n✅ Screenshots completed successfully!'));
-    console.log(chalk.cyan(`📂 Results: ${path.relative(process.cwd(), sessionDir)}`));
+    console.log(chalk.cyan(`📂 Relative Path: ${path.relative(process.cwd(), sessionDir)}`));
+    console.log(chalk.yellow.bold(`📁 Absolute Server Path: ${absoluteServerPath}`));
     console.log(chalk.cyan(`⏱️  Duration: ${duration}s`));
     console.log(chalk.cyan(`📊 Created: ${fullPageCount} full page + ${viewportCount} viewport screenshots`));
+    
+    if (externalUrls) {
+      console.log(chalk.green.bold('\n🌐 External URLs:'));
+      console.log(chalk.blue(`📋 Main Dashboard: ${externalUrls.mainPage}`));
+      console.log(chalk.magenta(`📸 Session Gallery: ${externalUrls.sessionPage}`));
+      console.log(chalk.gray('🖼️  Direct Image URLs:'));
+      externalUrls.directImages.forEach((url, index) => {
+        const filename = path.basename(screenshots[index].path);
+        console.log(chalk.gray(`   • ${filename}: ${url}`));
+      });
+    } else {
+      console.log(chalk.yellow('\n⚠️  Web server not detected. Start with: node src/cli/index.js serve'));
+    }
+  }
+
+  /**
+   * Find active web server port by checking common ports
+   * @private
+   */
+  async findActiveWebServerPort() {
+    const commonPorts = [9000, 9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010];
+    
+    for (const port of commonPorts) {
+      if (await this.isPortInUse(port)) {
+        return port;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Check if port is in use
+   * @private
+   */
+  async isPortInUse(port) {
+    return new Promise((resolve) => {
+      const socket = new net.Socket();
+      
+      socket.setTimeout(1000);
+      socket.on('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve(false);
+      });
+      
+      socket.on('error', () => {
+        resolve(false);
+      });
+      
+      socket.connect(port, 'localhost');
+    });
   }
 }
 

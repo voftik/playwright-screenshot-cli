@@ -115,3 +115,14 @@ ssl/
 
 # Production config
 config/production.js
+
+# Temporary files
+*.log
+test*.js
+test*.html
+debug*.html
+fix_*.js
+enhance_*.js
+extracted_*.html
+simple_server.js
+results/*

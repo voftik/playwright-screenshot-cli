@@ -98,17 +98,56 @@ async function fileExists(filePath) {
 }
 
 /**
- * Get directory contents filtered by extension
+ * Get directory contents (both files and directories)
+ * @param {string} dirPath - Directory path
+ * @returns {Promise<string[]>} Array of directory contents
+ */
+async function getDirContents(dirPath) {
+  try {
+    return await fs.readdir(dirPath);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get files filtered by extension
  * @param {string} dirPath - Directory path
  * @param {string} extension - File extension to filter by
  * @returns {Promise<string[]>} Array of matching file names
  */
 async function getFilesByExtension(dirPath, extension) {
   try {
-    const files = await fs.readdir(dirPath);
-    return files.filter(file => file.endsWith(extension));
+    const contents = await fs.readdir(dirPath);
+    if (extension === '/') {
+      // Return directories only
+      const directories = [];
+      for (const item of contents) {
+        const itemPath = path.join(dirPath, item);
+        const stat = await fs.stat(itemPath);
+        if (stat.isDirectory()) {
+          directories.push(item);
+        }
+      }
+      return directories;
+    }
+    return contents.filter(file => file.endsWith(extension));
   } catch {
     return [];
+  }
+}
+
+/**
+ * Check if path is directory
+ * @param {string} dirPath - Path to check
+ * @returns {Promise<boolean>} True if directory
+ */
+async function isDirectory(dirPath) {
+  try {
+    const stat = await fs.stat(dirPath);
+    return stat.isDirectory();
+  } catch {
+    return false;
   }
 }
 
@@ -118,5 +157,7 @@ module.exports = {
   parseTimestamp,
   generateTimestamp,
   fileExists,
-  getFilesByExtension
+  getFilesByExtension,
+  getDirContents,
+  isDirectory
 };

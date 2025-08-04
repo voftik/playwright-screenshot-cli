@@ -52,9 +52,11 @@ module.exports = {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrcAttr: ["'unsafe-inline'"], // Разрешить inline обработчики событий
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        imgSrc: ["'self'", "data:", "https:"]
+        imgSrc: ["'self'", "data:", "https:", "http:"], // Добавить http: для локальных изображений
+        connectSrc: ["'self'"]
       }
     }
   }
