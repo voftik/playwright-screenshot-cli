@@ -6,10 +6,10 @@ Maintainer: PScreen Team <support@pscreen.local>
 Depends: nodejs (>= 16.0.0), npm, ufw
 Recommends: chromium-browser
 Filename: pool/main/p/pscreen-cli/pscreen-cli.deb
-Size: 71492
-MD5sum: 4fedebf5a5263d88bdf94c47bfe5e2e7
-SHA1: cb8ce741aeb4c969cf8faabe618df95dd0bf888c
-SHA256: bcf402bde9a6f5f37aa41600b5a4ae69d573c89cac0800f92b0022219d40b833
+Size: 71750
+MD5sum: 08dbd49725e796b24f5ba75fd8a8b5c7
+SHA1: 7458dbc8e2717849eb3379fa9790d2742f759d39
+SHA256: 3a24be646a5363900b5adba9adf0fe5d63570afa82587fcf0f60777f85a7651c
 Section: utils
 Priority: optional
 Homepage: https://github.com/voftik/playwright-screenshot-cli

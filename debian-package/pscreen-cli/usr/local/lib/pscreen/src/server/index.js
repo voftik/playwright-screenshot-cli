@@ -35,9 +35,23 @@ class ScreenshotServer {
       this.app.use(helmet.contentSecurityPolicy({ directives: cspConfig.directives }));
     }
     
-    // Serve static files from results directory
-    this.app.use(express.static(path.join(process.cwd(), config.screenshot.outputDir)));
-    this.app.use(express.static('static'));
+    // Serve static files from results directory with proper paths
+    const resultsDir = config.screenshot.outputDir;
+    console.log('Setting up static files from:', resultsDir);
+    
+    // Serve screenshots directly from results directory
+    this.app.use('/', express.static(resultsDir, {
+      dotfiles: 'ignore',
+      etag: false,
+      extensions: ['png', 'jpg', 'jpeg'],
+      index: false,
+      maxAge: '1d',
+      redirect: false,
+      setHeaders: function (res, path, stat) {
+        res.set('x-timestamp', Date.now());
+      }
+    }));
+    
     this.app.use(express.json());
     
     this.app.use((req, res, next) => {
@@ -58,6 +72,20 @@ class ScreenshotServer {
     // API routes
     this.app.get('/api/stats', (req, res) => this.getStorageStats(req, res));
     this.app.delete('/api/screenshots', (req, res) => this.deleteAllScreenshots(req, res));
+    
+    // Direct image access route
+    this.app.get('/:domain/:timestamp/:filename', (req, res) => {
+      const { domain, timestamp, filename } = req.params;
+      const imagePath = path.join(config.screenshot.outputDir, domain, timestamp, filename);
+      
+      // Check if file exists
+      if (fs.existsSync(imagePath)) {
+        res.sendFile(path.resolve(imagePath));
+      } else {
+        logger.error(`Image not found: ${imagePath}`);
+        res.status(404).json({ error: 'Image not found', path: imagePath });
+      }
+    });
   }
 
   /**

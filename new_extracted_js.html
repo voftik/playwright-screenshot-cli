@@ -1,0 +1,73 @@
+              <script>
+          // Show/hide loading indicator
+          function showLoading(show) {
+            const loading = document.getElementById('loading');
+            loading.style.display = show ? 'block' : 'none';
+          }
+
+          // Load and display storage statistics
+          async function loadStats() {
+            showLoading(true);
+            try {
+              const response = await fetch('/api/stats');
+              const data = await response.json();
+              
+              if (data.success) {
+                const statsDiv = document.getElementById('stats-display');
+                const stats = data.stats;
+                statsDiv.innerHTML = '<strong>📈 Статистика хранилища:</strong><br>' +
+                  '📁 Доменов: ' + stats.domains + '<br>' +
+                  '📅 Сессий: ' + stats.sessions + '<br>' +
+                  '🖼️ Файлов: ' + stats.totalFiles + '<br>' +
+                  '💾 Размер: ' + stats.totalSizeMB.toFixed(1) + ' МБ';
+                statsDiv.style.display = 'block';
+              } else {
+                alert('Ошибка загрузки статистики: ' + data.message);
+              }
+            } catch (error) {
+              alert('Ошибка соединения: ' + error.message);
+            }
+            showLoading(false);
+          }
+
+          // Confirm and delete all screenshots
+          function confirmDeleteAll() {
+            var confirmText = '⚠️ ВНИМАНИЕ!
+
+' +
+              'Вы действительно хотите удалить ВСЕ скриншоты?
+
+' +
+              'Это действие нельзя отменить!';
+            if (confirm(confirmText)) {
+              deleteAllScreenshots();
+            }
+          }
+
+          // Delete all screenshots via API
+          async function deleteAllScreenshots() {
+            showLoading(true);
+            try {
+              const response = await fetch('/api/screenshots', {
+                method: 'DELETE'
+              });
+              const data = await response.json();
+              
+              if (data.success) {
+                alert('✅ ' + data.message);
+                // Reload page to update the list
+                window.location.reload();
+              } else {
+                alert('❌ Ошибка удаления: ' + data.message);
+              }
+            } catch (error) {
+              alert('❌ Ошибка соединения: ' + error.message);
+            }
+            showLoading(false);
+          }
+
+          // Auto-load stats on page load
+          document.addEventListener('DOMContentLoaded', function() {
+            loadStats();
+          });
+        </script>
