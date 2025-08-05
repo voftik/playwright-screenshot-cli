@@ -1,0 +1,30 @@
+Package: pscreen-cli
+Version: 2.0.0
+Architecture: all
+Essential: no
+Maintainer: PScreen Team <support@pscreen.local>
+Depends: nodejs (>= 16.0.0), npm, ufw
+Recommends: chromium-browser
+Filename: pool/main/p/pscreen-cli/pscreen-cli.deb
+Size: 71492
+MD5sum: 4fedebf5a5263d88bdf94c47bfe5e2e7
+SHA1: cb8ce741aeb4c969cf8faabe618df95dd0bf888c
+SHA256: bcf402bde9a6f5f37aa41600b5a4ae69d573c89cac0800f92b0022219d40b833
+Section: utils
+Priority: optional
+Homepage: https://github.com/voftik/playwright-screenshot-cli
+Description: Professional Screenshot CLI Tool
+ PScreen is a powerful command-line tool for creating professional
+ screenshots of web pages using Playwright. Features include:
+ .
+ * Full page and viewport screenshots
+ * Built-in web interface for viewing results
+ * Automatic external IP detection and URL generation
+ * Smart cleanup and storage management
+ * Automatic firewall configuration
+ * RESTful API for integration
+ .
+ Simply run 'pscreen' to start the interactive screenshot tool.
+ The tool will guide you through the process and provide
+ external URLs for easy sharing and viewing.
+

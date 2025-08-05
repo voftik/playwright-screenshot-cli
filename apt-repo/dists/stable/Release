@@ -1,0 +1,9 @@
+Origin: PScreen Repository
+Label: PScreen CLI
+Suite: stable
+Codename: stable
+Version: 1.0
+Architectures: amd64 all
+Components: main
+Description: PScreen CLI Repository
+Date: $(date -Ru)

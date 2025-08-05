@@ -126,3 +126,9 @@ enhance_*.js
 extracted_*.html
 simple_server.js
 results/*
+
+# APT Repository files
+apt-repo/dists/stable/main/binary-amd64/Packages*
+
+# Package build artifacts
+*.deb

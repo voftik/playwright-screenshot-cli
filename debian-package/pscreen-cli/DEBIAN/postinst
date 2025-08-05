@@ -1,0 +1,91 @@
+#!/bin/bash
+
+set -e
+
+# Post-installation script for pscreen-cli
+
+echo "🔧 Configuring PScreen CLI..."
+
+# Create necessary directories
+mkdir -p /var/lib/pscreen/results
+mkdir -p /var/log
+mkdir -p /etc/pscreen
+
+# Set proper permissions
+chown -R root:root /usr/local/lib/pscreen
+chmod -R 755 /usr/local/lib/pscreen
+chmod +x /usr/local/bin/pscreen
+
+# Create default configuration
+cat > /etc/pscreen/config.json << 'EOL'
+{
+  "screenshot": {
+    "outputDir": "/var/lib/pscreen/results",
+    "defaultTimeout": 30000,
+    "defaultWidth": 1280,
+    "defaultHeight": 720,
+    "defaultBrowser": "chromium"
+  },
+  "server": {
+    "defaultPort": 9000,
+    "portRange": [9000, 9010],
+    "host": "0.0.0.0"
+  },
+  "security": {
+    "cors": {
+      "enabled": true,
+      "origin": "*"
+    },
+    "csp": {
+      "enabled": true
+    }
+  },
+  "logging": {
+    "level": "info",
+    "file": "/var/log/pscreen.log"
+  }
+}
+EOL
+
+# Create log file
+touch /var/log/pscreen.log
+chmod 666 /var/log/pscreen.log
+
+# Install Node.js dependencies
+echo "📦 Installing Node.js dependencies..."
+cd /usr/local/lib/pscreen
+
+# Install npm dependencies
+if npm install --production --silent > /dev/null 2>&1; then
+    echo "✅ Dependencies installed successfully"
+else
+    echo "⚠️  Warning: Could not install all dependencies automatically"
+    echo "   Please run: sudo npm install --prefix /usr/local/lib/pscreen"
+fi
+
+# Install Playwright browsers
+if npx playwright install chromium > /dev/null 2>&1; then
+    echo "✅ Playwright browser installed successfully"
+else
+    echo "⚠️  Warning: Could not install Playwright browser automatically"
+    echo "   Please run: sudo npx playwright install chromium --prefix /usr/local/lib/pscreen"
+fi
+
+# Add to PATH if not already there
+if ! grep -q "/usr/local/bin" /etc/environment; then
+    echo 'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/environment
+fi
+
+echo ""
+echo "🎉 PScreen CLI has been installed successfully!"
+echo ""
+echo "Usage:"
+echo "  pscreen                    # Interactive mode"
+echo "  pscreen --help             # Show help"
+echo ""
+echo "Configuration file: /etc/pscreen/config.json"
+echo "Results directory: /var/lib/pscreen/results"
+echo "Log file: /var/log/pscreen.log"
+echo ""
+
+exit 0

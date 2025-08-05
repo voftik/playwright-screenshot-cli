@@ -1,0 +1,276 @@
+#!/bin/bash
+
+# PScreen - Professional Screenshot CLI Tool
+# Interactive mode for easy screenshot creation
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Configuration
+PSCREEN_DIR="/usr/local/lib/pscreen"
+RESULTS_DIR="/var/lib/pscreen/results"
+LOG_FILE="/var/log/pscreen.log"
+
+# Ensure results directory exists and has proper permissions
+sudo mkdir -p "$RESULTS_DIR"
+sudo chown $USER:$USER "$RESULTS_DIR" 2>/dev/null || true
+
+# Function to print colored output
+print_header() {
+    echo -e "\n${BLUE}🖼️  PScreen - Professional Screenshot CLI${NC}"
+    echo -e "${CYAN}================================================${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+print_info() {
+    echo -e "${CYAN}ℹ️  $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+# Function to validate URL
+validate_url() {
+    local url="$1"
+    if [[ $url =~ ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/.*)?$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to check dependencies
+check_dependencies() {
+    print_info "Checking dependencies..."
+    
+    if ! command -v node >/dev/null 2>&1; then
+        print_error "Node.js is not installed. Please install Node.js 16+ first."
+        exit 1
+    fi
+    
+    if ! command -v npm >/dev/null 2>&1; then
+        print_error "NPM is not installed. Please install npm first."
+        exit 1
+    fi
+    
+    # Check if playwright is installed
+    if [ ! -d "$PSCREEN_DIR/node_modules" ]; then
+        print_info "Installing dependencies... This may take a few minutes."
+        cd "$PSCREEN_DIR"
+        sudo npm install --production --silent 2>/dev/null || {
+            print_error "Failed to install dependencies. Please run: sudo npm install"
+            exit 1
+        }
+    fi
+    
+    print_success "All dependencies are ready!"
+}
+
+# Function to get user input
+get_screenshot_options() {
+    print_info "Configure your screenshot session:"
+    
+    # Get URL
+    while true; do
+        echo -e "\n${YELLOW}📝 Enter the website URL to screenshot:${NC}"
+        read -p "URL: " website_url
+        
+        if [ -z "$website_url" ]; then
+            print_warning "URL cannot be empty. Please try again."
+            continue
+        fi
+        
+        # Add https:// if not present
+        if [[ ! $website_url =~ ^https?:// ]]; then
+            website_url="https://$website_url"
+        fi
+        
+        if validate_url "$website_url"; then
+            break
+        else
+            print_warning "Invalid URL format. Please enter a valid URL (e.g., https://example.com)"
+        fi
+    done
+    
+    # Get viewport size
+    echo -e "\n${YELLOW}📱 Select viewport size:${NC}"
+    echo "1) 1280x720 (HD Ready)"
+    echo "2) 1920x1080 (Full HD)"
+    echo "3) 1366x768 (Laptop)"
+    echo "4) 1440x900 (MacBook)"
+    echo "5) Custom size"
+    read -p "Choice [1]: " size_choice
+    
+    case ${size_choice:-1} in
+        1) width=1280; height=720 ;;
+        2) width=1920; height=1080 ;;
+        3) width=1366; height=768 ;;
+        4) width=1440; height=900 ;;
+        5) 
+            read -p "Width [1920]: " width
+            read -p "Height [1080]: " height
+            width=${width:-1920}
+            height=${height:-1080}
+            ;;
+        *) width=1280; height=720 ;;
+    esac
+    
+    # Ask about starting web server
+    echo -e "\n${YELLOW}🌐 Start web server after taking screenshots?${NC}"
+    read -p "Start web server? [Y/n]: " start_server
+    start_server=${start_server:-Y}
+    
+    if [[ $start_server =~ ^[Yy] ]]; then
+        read -p "Web server port [9000]: " server_port
+        server_port=${server_port:-9000}
+        with_server="--server --port $server_port"
+    else
+        with_server=""
+    fi
+}
+
+# Function to take screenshots
+take_screenshots() {
+    print_info "Starting screenshot capture..."
+    echo -e "${CYAN}📊 Configuration:${NC}"
+    echo -e "   🌐 URL: $website_url"
+    echo -e "   📱 Size: ${width}x${height}"
+    echo -e "   📁 Output: $RESULTS_DIR"
+    
+    cd "$PSCREEN_DIR"
+    
+    # Export the results directory for the application
+    export PSCREEN_RESULTS_DIR="$RESULTS_DIR"
+    
+    # Run the screenshot command
+    if node src/cli/index.js take "$website_url" --width "$width" --height "$height" --output-dir "$RESULTS_DIR" $with_server; then
+        print_success "Screenshots completed successfully!"
+    else
+        print_error "Screenshot capture failed. Check the logs for details."
+        return 1
+    fi
+}
+
+# Function to show usage
+show_usage() {
+    echo -e "\n${BLUE}Usage:${NC}"
+    echo "  pscreen                    # Interactive mode (recommended)"
+    echo "  pscreen --url <URL>        # Direct mode"
+    echo "  pscreen --serve [PORT]     # Start web server only"
+    echo "  pscreen --cleanup          # Clean old screenshots"
+    echo "  pscreen --help             # Show this help"
+    echo ""
+    echo -e "${BLUE}Examples:${NC}"
+    echo "  pscreen                              # Interactive screenshot tool"
+    echo "  pscreen --url https://example.com    # Direct screenshot"
+    echo "  pscreen --serve 9000                 # Start web server on port 9000"
+    echo "  pscreen --cleanup                    # Clean old files"
+}
+
+# Function to start web server only
+start_web_server() {
+    local port=${1:-9000}
+    print_info "Starting web server on port $port..."
+    
+    cd "$PSCREEN_DIR"
+    export PSCREEN_RESULTS_DIR="$RESULTS_DIR"
+    
+    node src/cli/index.js serve --port "$port"
+}
+
+# Function to cleanup old files
+cleanup_screenshots() {
+    print_info "Cleaning up old screenshots..."
+    
+    cd "$PSCREEN_DIR"
+    export PSCREEN_RESULTS_DIR="$RESULTS_DIR"
+    
+    echo -e "${YELLOW}Select cleanup option:${NC}"
+    echo "1) Delete all screenshots"
+    echo "2) Delete screenshots older than 7 days"
+    echo "3) Delete screenshots older than 30 days"
+    echo "4) Custom days"
+    read -p "Choice [2]: " cleanup_choice
+    
+    case ${cleanup_choice:-2} in
+        1) node src/cli/index.js cleanup --all ;;
+        2) node src/cli/index.js cleanup --days 7 ;;
+        3) node src/cli/index.js cleanup --days 30 ;;
+        4) 
+            read -p "Delete files older than how many days? " days
+            node src/cli/index.js cleanup --days "$days"
+            ;;
+        *) node src/cli/index.js cleanup --days 7 ;;
+    esac
+}
+
+# Main function
+main() {
+    print_header
+    
+    # Parse command line arguments
+    case "$1" in
+        --help|-h)
+            show_usage
+            exit 0
+            ;;
+        --url)
+            if [ -z "$2" ]; then
+                print_error "URL is required when using --url option"
+                show_usage
+                exit 1
+            fi
+            website_url="$2"
+            width=1280
+            height=720
+            with_server=""
+            check_dependencies
+            take_screenshots
+            exit 0
+            ;;
+        --serve)
+            port=${2:-9000}
+            check_dependencies
+            start_web_server "$port"
+            exit 0
+            ;;
+        --cleanup)
+            check_dependencies
+            cleanup_screenshots
+            exit 0
+            ;;
+        "")
+            # Interactive mode
+            check_dependencies
+            get_screenshot_options
+            take_screenshots
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+}
+
+# Trap interrupts
+trap 'echo -e "\n${YELLOW}📋 Operation interrupted by user${NC}"; exit 1' INT TERM
+
+# Run main function
+main "$@"

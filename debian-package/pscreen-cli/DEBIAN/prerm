@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -e
+
+# Pre-removal script for pscreen-cli
+
+echo "🗑️  Removing PScreen CLI..."
+
+# Stop any running pscreen processes
+pkill -f pscreen || true
+pkill -f "node.*src/cli/index.js" || true
+
+# Remove from PATH in environment file (optional, commented out to be safe)
+# sed -i 's|:/usr/local/bin||g' /etc/environment
+
+echo "✅ PScreen CLI processes stopped"
+
+exit 0
