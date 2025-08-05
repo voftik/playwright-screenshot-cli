@@ -1,6 +1,6 @@
 {
   "name": "playwright-screenshot-cli",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Professional CLI tool for creating screenshots using Playwright with a modern web interface",
   "main": "index.js",
   "scripts": {

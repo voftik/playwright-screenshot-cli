@@ -1,0 +1,14 @@
+Package: pscreen-cli
+Version: 2.0.1
+Section: utils
+Priority: optional
+Architecture: all
+Depends: nodejs (>= 18.0.0), npm
+Maintainer: PScreen Team <pscreen@example.com>
+Description: Professional Playwright Screenshot CLI Tool
+ Advanced CLI tool for taking screenshots of web pages using Playwright.
+ Features include full-page screenshots, viewport capture, web server interface,
+ automatic port management, external IP detection, and batch processing support.
+ .
+ Version 2.0.1 includes improved port conflict resolution and automatic fallback
+ to available ports when the specified port is in use.

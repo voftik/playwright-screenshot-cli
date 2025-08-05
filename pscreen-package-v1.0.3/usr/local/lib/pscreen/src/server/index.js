@@ -35,9 +35,23 @@ class ScreenshotServer {
       this.app.use(helmet.contentSecurityPolicy({ directives: cspConfig.directives }));
     }
     
-    // Serve static files from results directory
-    this.app.use(express.static(path.join(process.cwd(), config.screenshot.outputDir)));
-    this.app.use(express.static('static'));
+    // Serve static files from results directory with proper paths
+    const resultsDir = config.screenshot.outputDir;
+    console.log('Setting up static files from:', resultsDir);
+    
+    // Serve screenshots directly from results directory
+    this.app.use('/', express.static(resultsDir, {
+      dotfiles: 'ignore',
+      etag: false,
+      extensions: ['png', 'jpg', 'jpeg'],
+      index: false,
+      maxAge: '1d',
+      redirect: false,
+      setHeaders: function (res, path, stat) {
+        res.set('x-timestamp', Date.now());
+      }
+    }));
+    
     this.app.use(express.json());
     
     this.app.use((req, res, next) => {
@@ -58,6 +72,20 @@ class ScreenshotServer {
     // API routes
     this.app.get('/api/stats', (req, res) => this.getStorageStats(req, res));
     this.app.delete('/api/screenshots', (req, res) => this.deleteAllScreenshots(req, res));
+    
+    // Direct image access route
+    this.app.get('/:domain/:timestamp/:filename', (req, res) => {
+      const { domain, timestamp, filename } = req.params;
+      const imagePath = path.join(config.screenshot.outputDir, domain, timestamp, filename);
+      
+      // Check if file exists
+      if (fs.existsSync(imagePath)) {
+        res.sendFile(path.resolve(imagePath));
+      } else {
+        logger.error(`Image not found: ${imagePath}`);
+        res.status(404).json({ error: 'Image not found', path: imagePath });
+      }
+    });
   }
 
   /**
@@ -76,7 +104,7 @@ class ScreenshotServer {
 
   async renderMainPage(req, res) {
     try {
-      const resultsDir = path.join(process.cwd(), config.screenshot.outputDir);
+      const resultsDir = config.screenshot.outputDir;
       await ensureDir(resultsDir);
       const sites = await this.getSitesData(resultsDir);
 
@@ -296,7 +324,7 @@ class ScreenshotServer {
   async renderSessionPage(req, res) {
     try {
       const { domain, timestamp } = req.params;
-      const sessionDir = path.join(process.cwd(), config.screenshot.outputDir, domain, timestamp);
+      const sessionDir = path.join(config.screenshot.outputDir, domain, timestamp);
       const screenshots = await getFilesByExtension(sessionDir, '.png');
 
       if (!screenshots.length) {
@@ -319,7 +347,7 @@ class ScreenshotServer {
    */
   async deleteAllScreenshots(req, res) {
     try {
-      const resultsDir = path.join(process.cwd(), config.screenshot.outputDir);
+      const resultsDir = config.screenshot.outputDir;
       const result = await cleanupManager.deleteAllScreenshots(resultsDir);
       
       if (result.success) {
@@ -339,7 +367,7 @@ class ScreenshotServer {
    */
   async getStorageStats(req, res) {
     try {
-      const resultsDir = path.join(process.cwd(), config.screenshot.outputDir);
+      const resultsDir = config.screenshot.outputDir;
       const stats = await cleanupManager.getStorageStats(resultsDir);
       res.json({ success: true, stats });
     } catch (error) {
@@ -391,7 +419,7 @@ class ScreenshotServer {
           
           <div class="screenshots">
             ${screenshots.map(screenshot => {
-              const localPath = path.join(process.cwd(), config.screenshot.outputDir, domain, timestamp, screenshot);
+              const localPath = path.join(config.screenshot.outputDir, domain, timestamp, screenshot);
               const webUrl = `${baseUrl}/${domain}/${timestamp}/${screenshot}`;
               
               return `
@@ -416,37 +444,24 @@ class ScreenshotServer {
    * Start the server
    * @param {Object} options
    */
-  /**
-   * Start the server with automatic port fallback
-   * @param {Object} options
-   */
   async startServer(options = {}) {
     try {
       const validatedOptions = validateServerOptions(options);
       let port = validatedOptions.port;
       
-      // If no port specified, use getPort which includes fallback logic
       if (!port) {
         port = await portManager.getPort();
-      } else {
-        // If port is specified, check if it's available, if not find alternative
-        const isAvailable = await portManager.isPortAvailable(port);
-        if (!isAvailable) {
-          logger.warn(`Specified port ${port} is not available, searching for alternative...`);
-          port = await portManager.findAvailablePort();
-          logger.info(`Using alternative port: ${port}`);
-        }
       }
 
       // Get external IP
       const ipInfo = await externalIpService.getExternalIp();
       this.baseUrl = `http://${ipInfo.ip}:${port}`;
 
-      // Start server with error handling
+      // Start server
       return new Promise((resolve, reject) => {
         this.serverInstance = this.app.listen(port, validatedOptions.host, () => {
           logger.info(`Server running on ${this.baseUrl}`);
-          logger.info(`Results directory: ${path.join(process.cwd(), config.screenshot.outputDir)}`);
+          logger.info(`Results directory: ${config.screenshot.outputDir}`);
           
           resolve({
             baseUrl: this.baseUrl,
@@ -456,35 +471,14 @@ class ScreenshotServer {
           });
         });
 
-        this.serverInstance.on('error', async (err) => {
-          if (err.code === 'EADDRINUSE') {
-            logger.warn(`Port ${port} became unavailable during startup, retrying with new port...`);
-            try {
-              const newPort = await portManager.findAvailablePort();
-              this.baseUrl = `http://${ipInfo.ip}:${newPort}`;
-              
-              this.serverInstance = this.app.listen(newPort, validatedOptions.host, () => {
-                logger.info(`Server running on ${this.baseUrl} (fallback port)`);
-                resolve({
-                  baseUrl: this.baseUrl,
-                  port: newPort,
-                  ip: ipInfo.ip,
-                  host: validatedOptions.host
-                });
-              });
-            } catch (retryError) {
-              logger.error(`Failed to start server on fallback port: ${retryError.message}`);
-              reject(retryError);
-            }
-          } else {
-            logger.error(`Server error: ${err.message}`);
-            reject(err);
-          }
+        this.serverInstance.on('error', (err) => {
+          logger.error(`Server error: ${err.message}`);
+          reject(err);
         });
       });
-    } catch (error) {
-      logger.error(`Failed to start server: ${error.message}`);
-      throw error;
+    } catch (err) {
+      logger.error(`Failed to start server: ${err.message}`);
+      throw err;
     }
   }
 }

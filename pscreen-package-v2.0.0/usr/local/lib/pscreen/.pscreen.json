@@ -1,0 +1,39 @@
+{
+  "screenshot": {
+    "outputDir": "./screenshots",
+    "width": 1920,
+    "height": 1080,
+    "fullPage": true,
+    "browser": "chromium",
+    "timeout": 30000,
+    "format": "png",
+    "quality": 90
+  },
+  "server": {
+    "enabled": true,
+    "port": 9000,
+    "host": "0.0.0.0",
+    "autoStart": true,
+    "staticPath": "/static"
+  },
+  "logging": {
+    "level": "info",
+    "console": true,
+    "file": "/var/log/pscreen.log",
+    "json": false,
+    "verbose": false,
+    "quiet": false
+  },
+  "automation": {
+    "retries": 3,
+    "timeout": 60000,
+    "parallelLimit": 1,
+    "continueOnError": false
+  },
+  "security": {
+    "cors": {
+      "enabled": true,
+      "origin": "*"
+    }
+  }
+}

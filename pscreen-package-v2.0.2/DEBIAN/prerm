@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+echo "🗑️  Removing PScreen CLI v2.0.1..."
+
+# Stop any running PScreen servers
+pkill -f "pscreen.*serve" 2>/dev/null || true
+pkill -f "node.*pscreen" 2>/dev/null || true
+
+echo "✅ PScreen CLI v2.0.1 removed successfully!"
+
+exit 0

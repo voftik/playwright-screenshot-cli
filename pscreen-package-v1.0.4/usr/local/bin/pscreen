@@ -1,0 +1,152 @@
+#!/bin/bash
+
+# PScreen CLI Tool v1.0.4
+APP_DIR="/usr/local/lib/pscreen"
+
+if [ ! -d "$APP_DIR" ]; then
+    echo "❌ PScreen не установлен корректно"
+    exit 1
+fi
+
+cd "$APP_DIR"
+
+# Проверяем аргументы командной строки
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+    echo "PScreen CLI Tool v1.0.4"
+    exit 0
+fi
+
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    echo "PScreen - Улучшенный инструмент для создания скриншотов"
+    echo ""
+    echo "Использование:"
+    echo "  pscreen                    - Интерактивный режим"
+    echo "  pscreen <url>              - Быстрый скриншот URL"
+    echo "  pscreen serve              - Запуск веб-сервера"
+    echo "  pscreen serve-standalone   - Запуск автономного сервера"
+    echo "  pscreen --version          - Показать версию"
+    echo "  pscreen --help             - Показать справку"
+    echo "  pscreen --debug            - Диагностика проблем"
+    echo "  pscreen --fix              - Исправить проблемы"
+    exit 0
+fi
+
+if [ "$1" = "--debug" ]; then
+    echo "🔍 Диагностика PScreen v1.0.4..."
+    echo ""
+    echo "📊 Системная информация:"
+    echo "   Node.js: $(node --version 2>/dev/null || echo 'не установлен')"
+    echo "   npm: $(npm --version 2>/dev/null || echo 'не установлен')"
+    echo "   Директория: $APP_DIR"
+    echo "   Результаты: /var/lib/pscreen/results"
+    
+    echo ""
+    echo "📁 Проверка файлов:"
+    for file in "src/cli/index.js" "src/server/index.js" "config/default.js" "package.json"; do
+        if [ -f "$APP_DIR/$file" ]; then
+            echo "   ✅ $file"
+        else
+            echo "   ❌ $file"
+        fi
+    done
+    
+    echo ""
+    echo "📂 Директория результатов:"
+    if [ -d "/var/lib/pscreen/results" ]; then
+        echo "   ✅ Существует"
+        echo "   📊 Содержимое: $(ls /var/lib/pscreen/results 2>/dev/null | wc -l) элементов"
+    else
+        echo "   ❌ НЕ существует"
+    fi
+    
+    echo ""
+    echo "🔧 Активные процессы:"
+    ps aux | grep "node.*pscreen\|node.*src" | grep -v grep || echo "   Нет активных процессов"
+    
+    exit 0
+fi
+
+if [ "$1" = "--fix" ]; then
+    echo "🔧 Исправление проблем PScreen v1.0.4..."
+    
+    # Создаем директорию результатов
+    sudo mkdir -p /var/lib/pscreen/results 2>/dev/null || mkdir -p /var/lib/pscreen/results
+    sudo chmod 755 /var/lib/pscreen/results 2>/dev/null || chmod 755 /var/lib/pscreen/results
+    
+    # Останавливаем процессы
+    sudo pkill -f "node.*pscreen\|node.*src" 2>/dev/null || pkill -f "node.*pscreen\|node.*src" 2>/dev/null || true
+    
+    # Проверяем и устанавливаем зависимости
+    if [ ! -d "node_modules" ]; then
+        echo "📦 Установка зависимостей..."
+        npm install --production --force 2>/dev/null || echo "⚠️  Не удалось установить зависимости"
+    fi
+    
+    echo "✅ Исправления применены"
+    echo "🚀 Теперь запустите: pscreen"
+    exit 0
+fi
+
+if [ "$1" = "serve-standalone" ]; then
+    echo "🚀 Запуск автономного сервера..."
+    shift
+    node src/server/index.js "$@"
+    exit $?
+fi
+
+# Если передан URL как аргумент
+if [ "$1" ] && [ "$1" != "serve" ]; then
+    echo "🎯 Создание скриншота для: $1"
+    node src/cli/index.js take "$1" --width 1920 --height 1080 --fullPage true --server true
+    exit $?
+fi
+
+# Команда serve
+if [ "$1" = "serve" ]; then
+    shift
+    echo "🚀 Запуск веб-сервера..."
+    node src/cli/index.js serve "$@"
+    exit $?
+fi
+
+# Интерактивный режим
+echo "🎯 PScreen v1.0.4 - Улучшенный инструмент для скриншотов"
+echo "======================================================="
+
+read -p "🌐 Введите URL сайта: " url
+if [ -z "$url" ]; then
+    echo "❌ URL не может быть пустым"
+    exit 1
+fi
+
+echo ""
+echo "📐 Настройки скриншота:"
+read -p "   Ширина (по умолчанию 1920): " width
+width=${width:-1920}
+
+read -p "   Высота (по умолчанию 1080): " height  
+height=${height:-1080}
+
+read -p "   Полная страница? (y/N): " fullpage
+if [[ "$fullpage" =~ ^[Yy]$ ]]; then
+    fullpage="true"
+else
+    fullpage="false"
+fi
+
+read -p "   Запустить веб-сервер? (Y/n): " server
+if [[ "$server" =~ ^[Nn]$ ]]; then
+    server="false"
+else
+    server="true"
+fi
+
+echo ""
+echo "🚀 Создание скриншота..."
+echo "   URL: $url"
+echo "   Размер: ${width}x${height}"
+echo "   Полная страница: $fullpage"
+echo "   Веб-сервер: $server"
+echo ""
+
+node src/cli/index.js take "$url" --width "$width" --height "$height" --fullPage "$fullpage" --server "$server"

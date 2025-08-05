@@ -1,0 +1,27 @@
+#!/bin/bash
+set -e
+
+echo "🔧 Installing PScreen CLI v2.0.1..."
+
+# Install dependencies in the package directory
+cd /usr/local/lib/pscreen
+npm install --production --silent 2>/dev/null || {
+    echo "⚠️  Warning: npm install failed, trying alternative method..."
+    npm install --production --no-optional --silent 2>/dev/null || true
+}
+
+# Install Playwright browsers
+echo "📥 Installing Playwright browsers..."
+npx playwright install chromium --quiet 2>/dev/null || {
+    echo "⚠️  Warning: Failed to install Playwright browsers automatically"
+    echo "   You can install them manually with: npx playwright install"
+}
+
+# Set permissions
+chmod +x /usr/local/bin/pscreen
+
+echo "✅ PScreen CLI v2.0.1 installation completed!"
+echo "📋 Run 'pscreen --help' to get started"
+echo "🌐 New in v2.0.1: Automatic port conflict resolution"
+
+exit 0

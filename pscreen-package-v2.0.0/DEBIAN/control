@@ -1,0 +1,21 @@
+Package: pscreen
+Version: 2.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: nodejs (>= 14), npm
+Maintainer: PScreen Team <admin@xproduct.ru>
+Description: PScreen v2.0.0 - Professional Screenshot CLI with Full Automation
+ Enhanced screenshot tool with complete automation support, perfect for CI/CD.
+ Features include batch processing, parallel execution, retry logic, JSON output,
+ configuration files, environment variables, and modern web interface.
+ .
+ Major improvements in v2.0.0:
+ - Full automation and non-interactive mode
+ - Batch processing from files
+ - Parallel screenshot capture
+ - Configuration files and environment variables
+ - JSON output for automation
+ - Enhanced logging and error handling
+ - Modern web server with API
+ - Library mode for programmatic usage

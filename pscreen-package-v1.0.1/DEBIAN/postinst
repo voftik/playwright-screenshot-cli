@@ -1,0 +1,37 @@
+#!/bin/bash
+
+echo "🔧 Настройка PScreen..."
+
+# Переходим в директорию приложения
+cd /usr/local/lib/pscreen
+
+# Устанавливаем зависимости если их нет
+if [ ! -d "node_modules" ]; then
+    echo "📦 Установка зависимостей..."
+    npm install --production --silent 2>/dev/null || {
+        echo "⚠️  Установка через npm, это может занять время..."
+        npm install --production
+    }
+fi
+
+# Устанавливаем Playwright браузеры если их нет
+if [ ! -d "node_modules/playwright/.local-browsers" ]; then
+    echo "🌐 Установка браузеров Playwright..."
+    npx playwright install chromium --with-deps >/dev/null 2>&1 || {
+        echo "⚠️  Установка браузеров, это может занять время..."
+        npx playwright install chromium --with-deps
+    }
+fi
+
+# Создаем директорию для результатов
+mkdir -p /usr/local/lib/pscreen/results
+chmod 755 /usr/local/lib/pscreen/results
+
+# Устанавливаем права доступа
+chmod +x /usr/local/bin/pscreen
+chmod -R 755 /usr/local/lib/pscreen
+
+echo "✅ PScreen v1.0.1 установлен успешно!"
+echo "🚀 Запустите: pscreen"
+
+exit 0

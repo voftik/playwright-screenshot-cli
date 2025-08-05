@@ -1,0 +1,66 @@
+#!/bin/bash
+
+echo "🔧 Настройка PScreen v1.0.3..."
+
+# Переходим в директорию приложения
+cd /usr/local/lib/pscreen
+
+# Устанавливаем зависимости если их нет
+if [ ! -d "node_modules" ]; then
+    echo "📦 Установка зависимостей..."
+    npm install --production --silent 2>/dev/null || {
+        echo "⚠️  Установка через npm, это может занять время..."
+        npm install --production
+    }
+fi
+
+# Устанавливаем Playwright браузеры если их нет
+if [ ! -d "node_modules/playwright/.local-browsers" ]; then
+    echo "🌐 Установка браузеров Playwright..."
+    npx playwright install chromium --with-deps >/dev/null 2>&1 || {
+        echo "⚠️  Установка браузеров, это может занять время..."
+        npx playwright install chromium --with-deps
+    }
+fi
+
+# КРИТИЧНО: Принудительно исправляем пути в серверном коде
+echo "🔨 Принудительно исправляем пути в серверном коде..."
+if [ -f "src/server/index.js" ]; then
+    # Создаем бэкап
+    cp src/server/index.js src/server/index.js.backup-postinst
+    
+    # Применяем исправления
+    sed -i 's|path\.join(process\.cwd(), config\.screenshot\.outputDir)|config.screenshot.outputDir|g' src/server/index.js
+    sed -i 's|path\.join(process\.cwd(), config\.screenshot\.outputDir, domain, timestamp)|path.join(config.screenshot.outputDir, domain, timestamp)|g' src/server/index.js  
+    sed -i 's|path\.join(process\.cwd(), config\.screenshot\.outputDir, domain, timestamp, screenshot)|path.join(config.screenshot.outputDir, domain, timestamp, screenshot)|g' src/server/index.js
+    
+    echo "✅ Серверный код принудительно исправлен"
+fi
+
+# Создаем правильную директорию для результатов
+echo "📁 Создание директории результатов..."
+mkdir -p /var/lib/pscreen/results
+chmod 755 /var/lib/pscreen/results
+
+# Останавливаем старые процессы
+pkill -f "node.*src/server" 2>/dev/null || true
+
+# Устанавливаем права доступа
+chmod +x /usr/local/bin/pscreen
+chmod -R 755 /usr/local/lib/pscreen
+
+echo "✅ PScreen v1.0.3 установлен успешно!"
+echo ""
+echo "🔧 Улучшения в v1.0.3:"
+echo "   • Принудительное исправление путей при установке"
+echo "   • Расширенная диагностика (pscreen --debug)"
+echo "   • Улучшенная команда исправления (pscreen --fix)"
+echo "   • Гарантированное устранение ошибок 404"
+echo ""
+echo "🚀 Использование:"
+echo "   pscreen              - Интерактивный режим"
+echo "   pscreen <url>        - Быстрый скриншот"  
+echo "   pscreen --debug      - Диагностика проблем"
+echo "   pscreen --fix        - Исправить проблемы"
+
+exit 0

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+echo "🔄 Остановка процессов PScreen..."
+pkill -f "pscreen\|node.*src" 2>/dev/null || true
+
+exit 0

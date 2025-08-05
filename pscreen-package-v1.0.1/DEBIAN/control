@@ -1,0 +1,11 @@
+Package: pscreen
+Version: 1.0.1
+Section: utils
+Priority: optional
+Architecture: all
+Depends: nodejs (>= 14), npm
+Maintainer: Admin <admin@xproduct.ru>
+Description: PScreen - Advanced Playwright Screenshot Tool with Web Interface
+ Interactive CLI tool for taking website screenshots using Playwright
+ with built-in web server for viewing results. Supports full-page
+ and viewport screenshots with customizable options.

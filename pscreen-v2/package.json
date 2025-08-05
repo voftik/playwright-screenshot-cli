@@ -1,0 +1,43 @@
+{
+  "name": "pscreen",
+  "version": "2.0.0",
+  "description": "Professional screenshot CLI tool with automation support using Playwright",
+  "main": "src/lib/index.js",
+  "bin": {
+    "pscreen": "src/cli/pscreen-cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli/pscreen-cli.js",
+    "serve": "node src/cli/pscreen-cli.js serve",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "screenshot",
+    "playwright",
+    "automation",
+    "cli",
+    "web",
+    "testing",
+    "ci-cd"
+  ],
+  "author": "PScreen Team",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.54.2",
+    "express": "^4.18.2",
+    "commander": "^11.0.0",
+    "winston": "^3.10.0",
+    "chalk": "^4.1.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/example/pscreen"
+  },
+  "bugs": {
+    "url": "https://github.com/example/pscreen/issues"
+  },
+  "homepage": "https://github.com/example/pscreen#readme"
+}

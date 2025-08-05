@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# PScreen CLI Tool v2.0.0
+APP_DIR="/usr/local/lib/pscreen"
+
+if [ ! -d "$APP_DIR" ]; then
+    echo "❌ PScreen не установлен корректно"
+    exit 1
+fi
+
+cd "$APP_DIR"
+
+# Check if we have the new CLI
+if [ -f "src/cli/pscreen-cli.js" ]; then
+    # Use new v2.0.0 CLI
+    node src/cli/pscreen-cli.js "$@"
+else
+    # Fallback to old version
+    echo "⚠️  Запуск в режиме совместимости"
+    node src/cli/index.js "$@"
+fi

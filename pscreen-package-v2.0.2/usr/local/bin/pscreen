@@ -1,0 +1,24 @@
+#!/bin/bash
+# PScreen CLI Launcher v2.0.1
+# Improved port management and conflict resolution
+
+# Check if Node.js is installed
+if ! command -v node &> /dev/null; then
+    echo "❌ Error: Node.js is not installed"
+    echo "   Please install Node.js 18+ to use PScreen CLI"
+    exit 1
+fi
+
+# Set working directory to package installation
+PSCREEN_DIR="/usr/local/lib/pscreen"
+
+if [ ! -d "$PSCREEN_DIR" ]; then
+    echo "❌ Error: PScreen installation directory not found"
+    echo "   Please reinstall PScreen CLI package"
+    exit 1
+fi
+
+cd "$PSCREEN_DIR"
+
+# Execute the CLI with all arguments
+exec node index.js "$@"

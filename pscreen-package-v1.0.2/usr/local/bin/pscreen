@@ -1,0 +1,93 @@
+#!/bin/bash
+
+# PScreen CLI Tool v1.0.2
+APP_DIR="/usr/local/lib/pscreen"
+
+if [ ! -d "$APP_DIR" ]; then
+    echo "❌ PScreen не установлен корректно"
+    exit 1
+fi
+
+cd "$APP_DIR"
+
+# Проверяем аргументы командной строки
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+    echo "PScreen CLI Tool v1.0.2"
+    exit 0
+fi
+
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    echo "PScreen - Инструмент для создания скриншотов веб-сайтов"
+    echo ""
+    echo "Использование:"
+    echo "  pscreen              - Интерактивный режим"
+    echo "  pscreen <url>        - Быстрый скриншот URL"
+    echo "  pscreen --version    - Показать версию"
+    echo "  pscreen --help       - Показать справку"
+    echo "  pscreen --fix        - Исправить проблемы с путями"
+    exit 0
+fi
+
+if [ "$1" = "--fix" ]; then
+    echo "🔧 Исправление проблем с путями..."
+    
+    # Создаем директорию для результатов если её нет
+    sudo mkdir -p /var/lib/pscreen/results
+    sudo chmod 755 /var/lib/pscreen/results
+    
+    # Останавливаем текущие процессы
+    sudo pkill -f "node.*src/server" 2>/dev/null || true
+    
+    echo "✅ Исправления применены"
+    echo "🚀 Теперь запустите: pscreen"
+    exit 0
+fi
+
+# Если передан URL как аргумент
+if [ "$1" ]; then
+    echo "🎯 Создание скриншота для: $1"
+    node src/cli/index.js take "$1" --width 1920 --height 1080 --fullPage true --server true
+    exit $?
+fi
+
+# Интерактивный режим
+echo "🎯 PScreen - Инструмент для создания скриншотов"
+echo "=============================================="
+
+read -p "🌐 Введите URL сайта: " url
+if [ -z "$url" ]; then
+    echo "❌ URL не может быть пустым"
+    exit 1
+fi
+
+echo ""
+echo "📐 Настройки скриншота:"
+read -p "   Ширина (по умолчанию 1920): " width
+width=${width:-1920}
+
+read -p "   Высота (по умолчанию 1080): " height  
+height=${height:-1080}
+
+read -p "   Полная страница? (y/N): " fullpage
+if [[ "$fullpage" =~ ^[Yy]$ ]]; then
+    fullpage="true"
+else
+    fullpage="false"
+fi
+
+read -p "   Запустить веб-сервер? (Y/n): " server
+if [[ "$server" =~ ^[Nn]$ ]]; then
+    server="false"
+else
+    server="true"
+fi
+
+echo ""
+echo "🚀 Создание скриншота..."
+echo "   URL: $url"
+echo "   Размер: ${width}x${height}"
+echo "   Полная страница: $fullpage"
+echo "   Веб-сервер: $server"
+echo ""
+
+node src/cli/index.js take "$url" --width "$width" --height "$height" --fullPage "$fullpage" --server "$server"

@@ -1,0 +1,51 @@
+#!/bin/bash
+
+echo "🔧 Настройка PScreen v1.0.4..."
+
+cd /usr/local/lib/pscreen
+
+# Устанавливаем зависимости
+if [ ! -d "node_modules" ]; then
+    echo "📦 Установка зависимостей..."
+    npm install --production --silent --force 2>/dev/null || {
+        echo "⚠️  Установка зависимостей через npm..."
+        npm install --production --force
+    }
+fi
+
+# Устанавливаем Playwright браузеры
+if [ ! -d "node_modules/playwright/.local-browsers" ]; then
+    echo "🌐 Установка браузеров Playwright..."
+    npx playwright install chromium --with-deps >/dev/null 2>&1 || {
+        echo "⚠️  Установка браузеров Playwright..."
+        npx playwright install chromium --with-deps
+    }
+fi
+
+# Создаем директорию результатов
+mkdir -p /var/lib/pscreen/results
+chmod 755 /var/lib/pscreen/results
+
+# Останавливаем старые процессы
+pkill -f "node.*pscreen\|node.*src" 2>/dev/null || true
+
+# Устанавливаем права
+chmod +x /usr/local/bin/pscreen
+chmod -R 755 /usr/local/lib/pscreen
+
+echo "✅ PScreen v1.0.4 установлен успешно!"
+echo ""
+echo "🆕 Новые возможности v1.0.4:"
+echo "   • Автономный сервер (pscreen serve-standalone)"
+echo "   • Улучшенная обработка ошибок"
+echo "   • Расширенная диагностика (pscreen --debug)"
+echo "   • Надежный запуск на удаленных серверах"
+echo ""
+echo "🚀 Использование:"
+echo "   pscreen                    - Интерактивный режим"
+echo "   pscreen serve              - Веб-сервер"
+echo "   pscreen serve-standalone   - Автономный сервер"
+echo "   pscreen --debug            - Диагностика"
+echo "   pscreen --fix              - Исправления"
+
+exit 0

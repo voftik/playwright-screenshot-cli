@@ -1,0 +1,13 @@
+Package: pscreen
+Version: 1.0.4
+Section: utils
+Priority: optional
+Architecture: all
+Depends: nodejs (>= 14), npm
+Maintainer: Admin <admin@xproduct.ru>
+Description: PScreen - Enhanced Playwright Screenshot Tool with Web Interface
+ Robust CLI tool with improved error handling and standalone server mode.
+ Designed for reliable execution on remote servers with comprehensive
+ debugging and automatic problem resolution.
+ .
+ v1.0.4: Enhanced error handling, standalone server, improved diagnostics

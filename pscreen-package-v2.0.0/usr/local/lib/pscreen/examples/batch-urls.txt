@@ -1,0 +1,7 @@
+# Example batch file for PScreen v2.0.0
+# Lines starting with # are comments
+
+https://example.com
+https://github.com
+https://stackoverflow.com
+https://developer.mozilla.org
